@@ -1,12 +1,21 @@
 import express from 'express';
 import argon2 from 'argon2'
+import jwt from 'jsonwebtoken';
+import { authMiddleware } from './middleware/middleware';
+import { JWT_SECRET } from "@repo/backend-common/config"
+import { CreateRoomSchema, CreateUserSchema, SigninSchema } from "@repo/common/types"
 
 const app = express();
 app.use(express.json());
 
 app.post("/signup", async(req, res) => {
   try {
-
+    const data = CreateUserSchema.safeParse(req.body);
+    if (!data.success) {
+      return res.json({
+        message: "Incorrect inputs"
+      })
+    }
     const {username, email, password} = req.body();
 
     if (!username || !email || !password ) {
@@ -23,7 +32,7 @@ app.post("/signup", async(req, res) => {
     });
 
     const user = 0;
-    
+
 
   } catch (err) {
 
@@ -32,8 +41,35 @@ app.post("/signup", async(req, res) => {
 
 
 app.post("/signin", async (req, res) => {
-  
+  const data = SigninSchema.safeParse(req.body);
+  if (!data.success) {
+      return res.json({
+        message: "Incorrect inputs"
+      })
+    }
+
+  const token = jwt.sign({
+    userId
+  }, JWT_SECRET);
+
+  res.json({token})
+
 })
+
+
+app.post("/room", authMiddleware, (req, res) => {
+  const data = CreateRoomSchema.safeParse(req.body);
+  if (!data.success) {
+      return res.json({
+        message: "Incorrect inputs"
+      })
+  }
+
+  res.json({
+    roomId: 
+  })
+})
+
 
 const PORT = 3005
 app.listen(PORT, () => {

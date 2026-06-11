@@ -1,10 +1,9 @@
-import { NextFunction } from "express";
+import { Request, Response, NextFunction } from "express";
 import jwt, { type JwtPayload } from "jsonwebtoken";
-
-const JWT_SECRET = process.env.JWT_SECRET;
+import JWT_SECRET from "@repo/backend-common/config"
 
 export function authMiddleware(req:Request, res: Response, next: NextFunction) {
-  const token = req.headers.authorization;
+  const token = req.headers["authorization"] ?? "";
   
   if (!token) {
     return res.status(401).json({
