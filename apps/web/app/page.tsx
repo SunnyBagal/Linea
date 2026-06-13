@@ -1,102 +1,110 @@
-import Image, { type ImageProps } from "next/image";
-import { Button } from "@repo/ui/button";
-import styles from "./page.module.css";
+"use client";
+/* apps/web/app/page.tsx — Linea landing */
+import Link from "next/link";
+import { type ReactNode } from "react";
+import { LineaLogo, LandingBoard } from "@repo/ui";
 
-type Props = Omit<ImageProps, "src"> & {
-  srcLight: string;
-  srcDark: string;
-};
-
-const ThemeImage = (props: Props) => {
-  const { srcLight, srcDark, ...rest } = props;
-
+export default function LandingPage() {
   return (
-    <>
-      <Image {...rest} src={srcLight} className="imgLight" />
-      <Image {...rest} src={srcDark} className="imgDark" />
-    </>
-  );
-};
+    <div className="ln-bg relative min-h-screen overflow-hidden antialiased">
+      <div className="ln-orb ln-orb-a" aria-hidden="true" />
+      <div className="ln-orb ln-orb-b" aria-hidden="true" />
 
-export default function Home() {
-  return (
-    <div className={styles.page}>
-      <main className={styles.main}>
-        <ThemeImage
-          className={styles.logo}
-          srcLight="turborepo-dark.svg"
-          srcDark="turborepo-light.svg"
-          alt="Turborepo logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol>
-          <li>
-            Get started by editing <code>apps/web/app/page.tsx</code>
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+      {/* ================= NAV ================= */}
+      <header className="relative z-10 mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
+        <Link href="/" className="flex items-center gap-2.5">
+          <LineaLogo size={32} />
+          <span className="ln-display text-lg font-semibold tracking-tight">Linea</span>
+        </Link>
+        <nav className="flex items-center gap-2">
+          <Link href="/signin" className="ln-btn-ghost rounded-xl px-4 py-2 text-sm font-medium">Sign in</Link>
+          <Link href="/signup" className="ln-btn-primary rounded-xl px-4 py-2 text-sm font-semibold">Get started</Link>
+        </nav>
+      </header>
 
-        <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new/clone?demo-description=Learn+to+implement+a+monorepo+with+a+two+Next.js+sites+that+has+installed+three+local+packages.&demo-image=%2F%2Fimages.ctfassets.net%2Fe5382hct74si%2F4K8ZISWAzJ8X1504ca0zmC%2F0b21a1c6246add355e55816278ef54bc%2FBasic.png&demo-title=Monorepo+with+Turborepo&demo-url=https%3A%2F%2Fexamples-basic-web.vercel.sh%2F&from=templates&project-name=Monorepo+with+Turborepo&repository-name=monorepo-turborepo&repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Fturborepo%2Ftree%2Fmain%2Fexamples%2Fbasic&root-directory=apps%2Fdocs&skippable-integrations=1&teamSlug=vercel&utm_source=create-turbo"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            href="https://turborepo.dev/docs?utm_source"
-            target="_blank"
-            rel="noopener noreferrer"
-            className={styles.secondary}
-          >
-            Read our docs
-          </a>
+      {/* ================= HERO ================= */}
+      <main className="relative z-10 mx-auto max-w-7xl px-6 pb-20 pt-14 text-center md:pt-20">
+        <div className="ln-rise" style={{ animationDelay: "0ms" }}>
+          <span className="ln-glass ln-text-2 inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-xs font-medium">
+            <span className="ln-pulse-dot" />
+            Now in public beta
+          </span>
         </div>
-        <Button appName="web" className={styles.secondary}>
-          Open alert
-        </Button>
+
+        <h1 className="ln-display ln-rise mx-auto mt-7 max-w-3xl text-5xl font-semibold leading-tight tracking-tight md:text-7xl" style={{ animationDelay: "90ms" }}>
+          Where ideas take{" "}
+          <span className="relative inline-block">
+            <span className="ln-hand ln-accent">shape</span>
+            <svg viewBox="0 0 120 12" className="absolute -bottom-2 left-0 w-full" aria-hidden="true" preserveAspectRatio="none">
+              <path d="M3 9 C 25 3, 45 11, 65 6 C 85 1, 102 8, 117 4" fill="none" stroke="#a6ff5e" strokeWidth="3" strokeLinecap="round" opacity=".85" />
+            </svg>
+          </span>
+        </h1>
+
+        <p className="ln-text-2 ln-rise mx-auto mt-6 max-w-xl text-base leading-relaxed md:text-lg" style={{ animationDelay: "180ms" }}>
+          Linea is the collaborative whiteboard for fast-moving teams. Sketch, point, and decide together — in real time, in your browser.
+        </p>
+
+        <div className="ln-rise mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row" style={{ animationDelay: "270ms" }}>
+          <Link href="/signup" className="ln-btn-primary ln-sheen relative w-full overflow-hidden rounded-xl px-7 py-3.5 text-base sm:w-auto">
+            Get started
+          </Link>
+          <Link href="/signin" className="ln-btn-ghost w-full rounded-xl px-7 py-3.5 text-base font-medium sm:w-auto">
+            Sign in
+          </Link>
+        </div>
+
+        <p className="ln-text-3 ln-rise mt-4 text-xs" style={{ animationDelay: "340ms" }}>
+          Free for small teams · No credit card required
+        </p>
+
+        {/* ================= LIVE BOARD (bigger, working-session scene) ================= */}
+        <div className="ln-rise" style={{ animationDelay: "420ms" }}>
+          <LandingBoard />
+        </div>
+
+        {/* ================= FEATURE CARDS ================= */}
+        <section className="mx-auto mt-20 grid max-w-5xl gap-5 sm:grid-cols-3">
+          <FeatureCard
+            title="Real-time cursors"
+            body="Every pointer is live. Watch teammates sketch, point, and react the moment it happens — like standing at the same whiteboard."
+            icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"><path d="M4 3l7.5 18 2.4-7.1L21 11.5 4 3z" /></svg>}
+          />
+          <FeatureCard
+            title="Infinite canvas"
+            body="Zoom out and the board keeps going. Architecture diagrams, sprint boards, and scribbles — all in one endless space."
+            icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6" /><path d="M9 21H3v-6" /><path d="M21 3l-7 7" /><path d="M3 21l7-7" /></svg>}
+          />
+          <FeatureCard
+            title="Hand-drawn feel"
+            body="Strokes with personality, not pixel-perfect noise. Rough edges keep ideas feeling early — so people keep iterating."
+            icon={<svg width="18" height="18" viewBox="0 0 22 18" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M2 13 C5 4, 9 4, 11 9 C13 14, 17 14, 20 5" /></svg>}
+          />
+        </section>
       </main>
-      <footer className={styles.footer}>
-        <a
-          href="https://vercel.com/templates?search=turborepo&utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          href="https://turborepo.dev?utm_source=create-turbo"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to turborepo.dev →
-        </a>
+
+      {/* ================= FOOTER ================= */}
+      <footer className="relative z-10 mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 py-8 sm:flex-row">
+        <div className="flex items-center gap-2">
+          <LineaLogo size={22} />
+          <span className="ln-text-3 text-xs">© 2026 Linea</span>
+        </div>
+        <div className="ln-text-3 flex gap-6 text-xs">
+          <a href="#" className="ln-foot-link">Privacy</a>
+          <a href="#" className="ln-foot-link">Terms</a>
+          <a href="#" className="ln-foot-link">Contact</a>
+        </div>
       </footer>
+    </div>
+  );
+}
+
+function FeatureCard({ icon, title, body }: { icon: ReactNode; title: string; body: string }) {
+  return (
+    <div className="ln-feature-card">
+      <span className="ln-icon-tile mb-4">{icon}</span>
+      <h3 className="text-[15px] font-semibold">{title}</h3>
+      <p className="ln-text-2 mt-2 text-sm leading-relaxed">{body}</p>
     </div>
   );
 }

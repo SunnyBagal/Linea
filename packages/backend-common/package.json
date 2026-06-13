@@ -16,8 +16,5 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
-  "dependencies": {
-    "node": "^26.3.0"
-  }
+  "type": "commonjs"
 }

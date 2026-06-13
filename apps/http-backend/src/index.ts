@@ -16,7 +16,7 @@ app.post("/signup", async(req, res) => {
         message: "Incorrect inputs"
       })
     }
-    const {username, email, password} = req.body();
+    const {username, email, password} = req.body;
 
     if (!username || !email || !password ) {
       return res.status(400).json({
@@ -48,6 +48,8 @@ app.post("/signin", async (req, res) => {
       })
     }
 
+    const userId = 1;
+
   const token = jwt.sign({
     userId
   }, JWT_SECRET);
@@ -66,7 +68,7 @@ app.post("/room", authMiddleware, (req, res) => {
   }
 
   res.json({
-    roomId: 
+    roomId: "xyz"
   })
 })
 

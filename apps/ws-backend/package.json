@@ -4,9 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "npm run build && npm run start",
-    "build": "tsc -b",
-    "start": "node dist/index.js"
+    "dev": "tsx watch --env-file=../../packages/backend-common/.env src/index.ts",
+    "build": "tsup",
+    "start": "node dist/index.js",
+    "check-types": "tsc --noEmit"
   },
   "dependencies": {
     "@types/jsonwebtoken": "^9.0.10",
@@ -14,9 +15,11 @@
     "ws": "^8.21.0"
   },
   "devDependencies": {
-    "@repo/typescript-config": "workspace:*",
     "@repo/backend-common": "workspace:*",
-    "@types/ws": "^8.18.1"
+    "@repo/typescript-config": "workspace:*",
+    "@types/ws": "^8.18.1",
+    "tsup": "^8.5.1",
+    "tsx": "^4.22.4"
   },
   "keywords": [],
   "author": "",
