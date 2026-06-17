@@ -7,34 +7,78 @@ datasource db {
   provider = "postgresql"
 }
 
-
 model User {
-  id        String   @default(uuid())   @id
-  email     String
-  password  String
-  name      String
-  image     String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @default(now())
-  rooms     Room[]
-  chats     Chat[]
+  id         String      @id @default(uuid())
+  email      String      @unique
+  password   String
+  username   String
+  image      String?
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  rooms      Room[]
+  operations Operation[]
+  chats      Chat[]
 }
 
 model Room {
-  id        Int      @default(autoincrement())  @id
-  slug      String   @unique
-  createdAt DateTime @default(now())
-  adminId   String
-  admin     User     @relation(fields: [adminId], references: [id])
-  chats     Chat[]
+  id         Int          @id @default(autoincrement())
+  slug       String       @unique
+  createdAt  DateTime     @default(now())
+  adminId    String
+  admin      User         @relation(fields: [adminId], references: [id])
+
+  currentSeq Int          @default(0)   // monotonic op counter for this room
+  operations Operation[]
+  snapshots  Snapshot[]
+  chats      Chat[]
+
+  @@index([adminId])
 }
 
+enum OpType {
+  CREATE
+  UPDATE
+  DELETE
+}
+
+model Operation {
+  id        BigInt   @id @default(autoincrement())
+  roomId    Int
+  seq       Int                      // per-room version number — makes "version N" meaningful
+  type      OpType
+  shapeId   String                   // which element this op touches
+  payload   Json                     // diff/shape data; opaque to the DB, applied by your reducer
+  userId    String
+  createdAt DateTime @default(now())
+
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@unique([roomId, seq])            // no gaps/dupes; also indexes the range scan
+  @@index([roomId, shapeId])         // "history of this one shape"
+}
+
+model Snapshot {
+  id        BigInt   @id @default(autoincrement())
+  roomId    Int
+  seq       Int                      // full state after applying ops up to & incl. this seq
+  state     Json                     // materialized board
+  createdAt DateTime @default(now())
+
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, seq])
+}
 
 model Chat {
-  id        Int      @default(autoincrement())  @id
+  id        Int      @id @default(autoincrement())
   userId    String
-  roomId    Int      
-  messages  String
-  room      Room     @relation(fields: [roomId], references: [id])
+  roomId    Int
+  message   String
+  createdAt DateTime @default(now())
+
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
   user      User     @relation(fields: [userId], references: [id])
+
+  @@index([roomId])
 }

@@ -1,80 +1,138 @@
 import express from 'express';
-import argon2 from 'argon2'
+import argon2 from 'argon2';
 import jwt from 'jsonwebtoken';
+import { Prisma } from '@repo/db/client';            
 import { authMiddleware } from './middleware/middleware';
-import { JWT_SECRET } from "@repo/backend-common/config"
-import { CreateRoomSchema, CreateUserSchema, SigninSchema } from "@repo/common/types"
+import { JWT_SECRET } from "@repo/backend-common/config";
+import { CreateRoomSchema, CreateUserSchema, SigninSchema } from "@repo/common/types";
+import { prisma } from "@repo/db/client";
 
 const app = express();
 app.use(express.json());
 
-app.post("/signup", async(req, res) => {
-  try {
-    const data = CreateUserSchema.safeParse(req.body);
-    if (!data.success) {
-      return res.json({
-        message: "Incorrect inputs"
-      })
-    }
-    const {username, email, password} = req.body;
+app.post("/signup", async (req, res) => {
 
-    if (!username || !email || !password ) {
-      return res.status(400).json({
-        message: "Username, email and password are required",
+  const parsed = CreateUserSchema.safeParse(req.body);
+
+  if (!parsed.success) {
+    return res.status(400).json({ 
+      message: "Incorrect inputs" 
+    });
+  }
+  
+  const { username, email, password } = parsed.data;
+
+  const hashedPassword = await argon2.hash(password, {
+    type: argon2.argon2id,
+    memoryCost: 32768,
+    timeCost: 3,
+    parallelism: 1,
+  });
+
+  try {
+    const user = await prisma.user.create({
+      data: { 
+        email, username, password: hashedPassword, image: "" 
+      },
+      select: { 
+        id: true,
+        username: true,
+        email: true 
+      },
+    });
+    return res.status(201).json({ userId: user.id });
+
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+
+      return res.status(409).json({ 
+        message: "User already exists." 
+      });
+    }
+    console.error(error);
+    return res.status(500).json({ 
+      message: "Issue creating account." 
+    });
+  }
+});
+
+app.post("/signin", async (req, res) => {
+  const parsed = SigninSchema.safeParse(req.body);
+
+  if (!parsed.success) {
+    return res.status(400).json({ 
+      message: "Incorrect inputs" 
+    });
+  }
+
+  const { email, password } = parsed.data;
+
+  const user = await prisma.user.findFirst({ 
+    where: { email } 
+  });
+
+  if (!user || !(await argon2.verify(user.password, password))) {
+    return res.status(403).json({ 
+      message: "Invalid email or password." 
+    });
+
+  }
+
+  const token = jwt.sign({ 
+    userId: user.id 
+  }, JWT_SECRET, { expiresIn: "7d" });
+
+  return res.json({ 
+    token 
+  });
+
+});
+
+app.post("/room", authMiddleware, async (req, res) => {
+
+  const parsed = CreateRoomSchema.safeParse(req.body);
+
+  if (!parsed.success) {
+    return res.status(400).json({ 
+      message: "Incorrect inputs" 
+    });
+  }
+  const { slug } = parsed.data;
+  const adminId = req.userId;  
+
+  if (!adminId) {
+    return res.status(401).json({
+      message: "Unauthorized"
+    });
+  }
+
+  try {
+    const room = await prisma.room.create({
+      data: { 
+        slug, adminId 
+      },
+      select: { id: true },
+    });
+
+    return res.status(201).json({ roomId: room.id });
+
+  } catch (error) {
+
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return res.status(409).json({ 
+        message: "Room name already taken." 
       });
     }
 
-    const hashedPassword = await argon2.hash(password, {
-      type: argon2.argon2id,
-      memoryCost: 32768,
-      timeCost: 3,
-      parallelism: 1
+    console.error(error);
+    return res.status(500).json({ 
+      message: "Could not create room." 
     });
 
-    const user = 0;
-
-
-  } catch (err) {
-
   }
-})
+});
 
-
-app.post("/signin", async (req, res) => {
-  const data = SigninSchema.safeParse(req.body);
-  if (!data.success) {
-      return res.json({
-        message: "Incorrect inputs"
-      })
-    }
-
-    const userId = 1;
-
-  const token = jwt.sign({
-    userId
-  }, JWT_SECRET);
-
-  res.json({token})
-
-})
-
-
-app.post("/room", authMiddleware, (req, res) => {
-  const data = CreateRoomSchema.safeParse(req.body);
-  if (!data.success) {
-      return res.json({
-        message: "Incorrect inputs"
-      })
-  }
-
-  res.json({
-    roomId: "xyz"
-  })
-})
-
-
-const PORT = 3005
+const PORT = 3005;
 app.listen(PORT, () => {
   console.log(`server is running on http://localhost:${PORT}`);
 });
-
