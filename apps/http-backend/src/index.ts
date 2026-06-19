@@ -19,7 +19,7 @@ app.post("/signup", async (req, res) => {
       message: "Incorrect inputs" 
     });
   }
-  
+
   const { username, email, password } = parsed.data;
 
   const hashedPassword = await argon2.hash(password, {
@@ -40,9 +40,13 @@ app.post("/signup", async (req, res) => {
         email: true 
       },
     });
-    return res.status(201).json({ userId: user.id });
+    return res.status(201).json({ 
+      userId: user.id,
+      username: user.username,
+    });
 
   } catch (error) {
+
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
 
       return res.status(409).json({ 
@@ -114,7 +118,9 @@ app.post("/room", authMiddleware, async (req, res) => {
       select: { id: true },
     });
 
-    return res.status(201).json({ roomId: room.id });
+    return res.status(201).json({ 
+      roomId: room.id 
+    });
 
   } catch (error) {
 
@@ -131,6 +137,20 @@ app.post("/room", authMiddleware, async (req, res) => {
 
   }
 });
+
+
+app.get("/chats/:roomId", async (req, res) {
+  const roomId = Number(req.params.roomId);
+  const message = await prisma.chat.findMany({
+    where: {
+      roomId: roomId
+    },
+    orderBy: {
+      id: "desc"
+    },
+    take: 50
+  })
+})
 
 const PORT = 3005;
 app.listen(PORT, () => {
