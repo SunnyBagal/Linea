@@ -1,7 +1,7 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import jwt from 'jsonwebtoken';
 import { JWT_SECRET } from '@repo/backend-common/config';
-import { prisma as prismaClient } from '@repo/db/client';
+import { prisma as prismaClient, Prisma } from '@repo/db/client';
 import { WsMessageSchema } from '@repo/common/types';
 
 const wss = new WebSocketServer({ port: 8080 });
@@ -139,7 +139,7 @@ wss.on('connection', (ws, request) => {
               seq: room.currentSeq,
               type: msg.opType,
               shapeId: msg.shapeId,
-              payload: msg.payload ?? undefined,
+              payload: msg.payload ?? Prisma.JsonNull,
               userId: conn.userId,
             },
             select: { seq: true },
