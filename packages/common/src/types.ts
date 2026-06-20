@@ -41,6 +41,7 @@ const OpSchema = z.object({
   type: z.literal('op'),
   roomId: z.number().int(),
   opType: z.enum(['CREATE','UPDATE','DELETE']),
+  shapeId: z.string(),
   payload: ShapeSchema.nullable(),
 });
 

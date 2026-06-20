@@ -138,19 +138,59 @@ app.post("/room", authMiddleware, async (req, res) => {
   }
 });
 
+app.get("/chats/:roomId", authMiddleware, async (req, res) => {
 
-app.get("/chats/:roomId", async (req, res) {
   const roomId = Number(req.params.roomId);
-  const message = await prisma.chat.findMany({
-    where: {
-      roomId: roomId
+  if (Number.isNaN(roomId)) {
+    return res.status(400).json({ message: "Invalid room id" });
+  }
+
+  try {
+    const messages = await prisma.chat.findMany({
+      where: { 
+        roomId 
+      },
+      orderBy: { 
+        createdAt: "desc" 
+      },
+      take: 50,
+    });
+
+    return res.json({ 
+      messages: messages.reverse() 
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({ 
+      message: "Could not fetch chats." 
+    });
+  }
+});
+
+app.get("/room/:slug", authMiddleware, async (req, res) => {
+  const slug = req.params.slug;
+  if (typeof slug !== "string") {
+    return res.status(400).json({
+      message: "Invalid slug"
+    });
+  }
+  const room = await prisma.room.findFirst({
+    where: { 
+      slug 
     },
-    orderBy: {
-      id: "desc"
-    },
-    take: 50
-  })
-})
+  });
+
+  if (!room) {
+    return res.status(404).json({ 
+      message: "Room not found" 
+    });
+  }
+
+  return res.json({ 
+    room 
+  });
+});
 
 const PORT = 3005;
 app.listen(PORT, () => {

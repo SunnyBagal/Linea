@@ -1,90 +1,195 @@
-import { WebSocketServer, WebSocket } from 'ws'
-import jwt, { JwtPayload } from 'jsonwebtoken'
-import { JWT_SECRET } from "@repo/backend-common/config"
-import { prismaClient } from '@repo/db'
+import { WebSocketServer, WebSocket } from 'ws';
+import jwt from 'jsonwebtoken';
+import { JWT_SECRET } from '@repo/backend-common/config';
+import { prisma as prismaClient } from '@repo/db/client';
+import { WsMessageSchema } from '@repo/common/types';
 
-const wss = new WebSocketServer({ port: 8080 })
+const wss = new WebSocketServer({ port: 8080 });
 
-interface User {
-  ws: WebSocket,
-  rooms: string[],
-  userId: string
+interface Connection {
+  ws: WebSocket;
+  userId: string;
+  rooms: Set<number>;   
+  isAlive: boolean;     
 }
 
-const users: User[] = [];
+const connections = new Map<WebSocket, Connection>();
 
-function checkUser(token: string): string | null  {
-  try{
+function checkUser(token: string): string | null {
+  try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    
-    if (typeof decoded == 'string'){
-      return null;
-    }
-    if (!decoded || !decoded.userId) {
-      return null;
-    } 
-    return decoded.userId;
+    if (typeof decoded === 'string' || !decoded.userId) return null;
 
-  } catch (err) {
-    return null
-  }
-} 
+    return decoded.userId as string;
 
-wss.on('connection', function connection(ws, request) {
-
-  const url = request.url;
-  if (!url) {
-    return;
-  }
-  const queryParams = new URLSearchParams(url.split("?")[1]);
-  const token = queryParams.get('token') || "";
-  const userId = checkUser(token);
-
-  if (userId == null) {
-    ws.close();
+  } catch {
     return null;
   }
+}
 
-  users.push({
-    userId, 
-    rooms: [],
-    ws
-  })
+function broadcast(roomId: number, payload: unknown, exclude?: WebSocket) {
+  const data = JSON.stringify(payload);
+  for (const conn of connections.values()) {
+    if (conn.ws === exclude) continue;
+    
+    if (conn.rooms.has(roomId) && conn.ws.readyState === WebSocket.OPEN) {
+      conn.ws.send(data);
+    }
+  }
+}
 
-  ws.on('message', async function message(data){
-    const parsedData = JSON.parse(data as unknown as string);
+wss.on('connection', (ws, request) => {
+  const url = request.url;
+  if (!url) {
+    ws.close();
+    return;
+  }
 
-    if (parsedData.type === "join_room") {
-      const user = users.find(x => x.ws === ws);
-      user?.rooms.push(parsedData.roomId)
+  const token = new URLSearchParams(url.split('?')[1]).get('token') ?? '';
+  const userId = checkUser(token);
+  if (!userId) {
+    ws.close();
+    return;
+  }
+
+  connections.set(ws, { ws, userId, rooms: new Set(), isAlive: true });
+
+  ws.on('pong', () => {
+    const conn = connections.get(ws);
+
+    if (conn) {
+      conn.isAlive = true
+    };
+  });
+
+  ws.on('message', async (raw) => {
+    const conn = connections.get(ws);
+    if (!conn) return;
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw.toString());
+    } catch {
+      return;
     }
 
-    if (parsedData.type === "leave_room"){
-      const user = users.find(x => x.ws === ws);
-      if (!user){
-        return 
+    const result = WsMessageSchema.safeParse(parsed);
+    if (!result.success) return;
+    const msg = result.data; 
+
+    if (msg.type === 'join_room') {
+
+      const room = await prismaClient.room.findUnique({
+        where: { 
+          id: msg.roomId 
+        },
+        select: { 
+          id: true 
+        },
+      });
+
+      if (room) {
+        conn.rooms.add(msg.roomId)
+      };
+
+      return;
+    }
+
+    if (msg.type === 'leave_room') {
+      conn.rooms.delete(msg.roomId);
+      return;
+    }
+
+
+    if (msg.type === 'chat') {
+
+      broadcast(msg.roomId, {
+        type: 'chat',
+        roomId: msg.roomId,
+        message: msg.message,
+        userId: conn.userId,
+      }, ws);
+
+      prismaClient.chat
+        .create({ 
+          data: { roomId: msg.roomId, message: msg.message, userId: conn.userId } 
+        })
+        .catch((err) => console.error('chat persist failed', err));
+      return;
+    }
+
+    if (msg.type === 'op') {
+      try {
+        const op = await prismaClient.$transaction(async (tx) => {
+          const room = await tx.room.update({
+            where: { 
+              id: msg.roomId 
+            },
+            data: { 
+              currentSeq: { increment: 1 } 
+            },   
+            select: { 
+              currentSeq: true 
+            },
+          });
+
+          return tx.operation.create({
+            data: {
+              roomId: msg.roomId,
+              seq: room.currentSeq,
+              type: msg.opType,
+              shapeId: msg.shapeId,
+              payload: msg.payload ?? undefined,
+              userId: conn.userId,
+            },
+            select: { seq: true },
+          });
+        });
+
+        broadcast(msg.roomId, {
+          type: 'op',
+          roomId: msg.roomId,
+          seq: op.seq,
+          opType: msg.opType,
+          shapeId: msg.shapeId,
+          payload: msg.payload,
+          userId: conn.userId,
+        }, ws);
+      } catch (err) {
+        console.error('op persist failed', err);
+        ws.send(JSON.stringify({ 
+          type: 'error', 
+          message: 'Failed to apply operation.' 
+        }));
       }
-      user.rooms = user.rooms.filter(x => x !== parsedData.roomId);
-    }
-
-    if (parsedData.type === 'chat') {
-      const roomId = parsedData.roomId;
-      const message = parsedData.message;
-
-      await prismaClient.chat.create({
-        data:{
-          roomId, message, userId
-        }
-      })
-      users.forEach(user => {
-        if (user.rooms.includes(roomId)){
-          user.ws.send(JSON.stringify({
-            type: 'chat',
-            message: message,
-            roomId
-          }))
-        }
-      })
+      return;
     }
   });
+
+  ws.on('close', () => {
+    connections.delete(ws);   
+  });
+
+  ws.on('error', (err) => {
+    console.error('ws error', err);
+    connections.delete(ws);
+  });
 });
+
+
+const HEARTBEAT_MS = 30_000;
+const heartbeat = setInterval(() => {
+  for (const conn of connections.values()) {
+    if (!conn.isAlive) {
+      conn.ws.terminate();
+      connections.delete(conn.ws);
+      continue;
+    }
+    conn.isAlive = false;
+    conn.ws.ping();
+  }
+}, HEARTBEAT_MS);
+
+wss.on('close', () => clearInterval(heartbeat));
+
+console.log('websocket server running on ws://localhost:8080');
