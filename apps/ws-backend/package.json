@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "tsx watch --env-file=../../packages/backend-common/.env src/index.ts",
+    "dev": "tsx watch --env-file=../../packages/backend-common/.env --env-file=../../packages/db/.env src/index.ts",
     "build": "tsup",
     "start": "node dist/index.js",
     "check-types": "tsc --noEmit"
