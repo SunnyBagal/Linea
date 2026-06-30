@@ -74,7 +74,10 @@ wss.on('connection', (ws, request) => {
     }
 
     const result = WsMessageSchema.safeParse(parsed);
-    if (!result.success) return;
+    if (!result.success){
+      console.log("WS frome rejected: ", result.error.issues);
+      return;
+    }
     const msg = result.data; 
 
     if (msg.type === 'join_room') {
@@ -191,5 +194,6 @@ const heartbeat = setInterval(() => {
 }, HEARTBEAT_MS);
 
 wss.on('close', () => clearInterval(heartbeat));
+
 
 console.log('websocket server running on ws://localhost:8080');

@@ -8,20 +8,16 @@ import { useChatStore } from "../../store/useChatStore";
 export function ChatRoomClient({ id }: { id: number }) {
   const { socket, loading } = useSocket();
   const { data: initialChats, isPending, isError } = useChats(id);
-
-  // Read live state + actions from the store.
   const chats = useChatStore((s) => s.chats);
   const setChats = useChatStore((s) => s.setChats);
   const addChat = useChatStore((s) => s.addChat);
 
   const [currentMessage, setCurrentMessage] = useState("");
 
-  // 1. Seed the store once the initial Query load resolves.
   useEffect(() => {
     if (initialChats) setChats(initialChats);
   }, [initialChats, setChats]);
 
-  // 2. Join the room + patch the store from live WS messages.
   useEffect(() => {
     if (!socket || loading) return;
 
@@ -41,9 +37,13 @@ export function ChatRoomClient({ id }: { id: number }) {
   const sendMessage = () => {
     if (!socket || !currentMessage.trim()) return;
     socket.send(
-      JSON.stringify({ type: "chat", roomId: id, message: currentMessage })
+      JSON.stringify({ 
+        type: "chat", 
+        roomId: id, 
+        message: currentMessage 
+      })
     );
-    // Server excludes the sender from its broadcast, so add locally.
+
     addChat({ message: currentMessage });
     setCurrentMessage("");
   };

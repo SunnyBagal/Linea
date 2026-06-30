@@ -3,7 +3,8 @@ import jwt, { type JwtPayload } from "jsonwebtoken";
 import {JWT_SECRET} from "@repo/backend-common/config"
 
 export function authMiddleware(req:Request, res: Response, next: NextFunction) {
-  const token = req.headers["authorization"] ?? "";
+  const authHeader = req.headers["authorization"] ?? "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : authHeader;
   
   if (!token) {
     return res.status(401).json({
