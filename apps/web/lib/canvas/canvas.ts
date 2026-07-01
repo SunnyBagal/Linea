@@ -10,6 +10,38 @@ export function drawShape(ctx: CanvasRenderingContext2D, shape: Shape){
   ctx.strokeStyle = '#111';
   ctx.lineWidth = 2;
   ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+
+  if (shape.type === "rect"){
+    ctx.strokeRect(shape.x, shape.y, shape.width, shape.height);
+  }
+
+  else if (shape.type === "circle"){
+    ctx.beginPath();
+    ctx.arc(shape.centerX, shape.centerY, shape.radius, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  else if (shape.type === "line"){
+    ctx.beginPath();
+    ctx.moveTo(shape.x1, shape.y1);
+    ctx.lineTo(shape.x2, shape.y2);
+    ctx.stroke();
+  }
+
+  else if (shape.type === "arrow"){
+    ctx.beginPath();
+    ctx.moveTo(shape.x1, shape.y1);
+    ctx.lineTo(shape.x2, shape.y2);
+    ctx.stroke();
+    const angle = Math.atan2(shape.y2 - shape.y1, shape.x2 - shape.x1);
+    const head = 12;
+    ctx.beginPath();
+    ctx.moveTo(shape.x2, shape.y2);
+    ctx.lineTo(
+      shape.x2 
+    )
+  }
 
 
 }
