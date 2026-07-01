@@ -9,7 +9,7 @@ export function useSocket() {
 
     const token = localStorage.getItem("token") ?? "";
     const ws = new WebSocket(`${WS_URL}?token=${token}`);
-
+ 
     ws.onopen = () => {
       setLoading(false);
       setSocket(ws);

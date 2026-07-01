@@ -30,3 +30,5 @@ export type Shape =
       type: "pencil";
       points: { x: number; y: number;}[]
   }
+
+  export type Tool = "rect" | "circle" | "line" | "arrow" | "pencil";

@@ -1,9 +1,17 @@
-import { Shape } from "./types";
+import { Shape, Tool } from "./types";
 import { BACKEND_URL } from "../../config";
 
 export function getCanvasPos(e: MouseEvent, canvas: HTMLCanvasElement) {
   const rect = canvas.getBoundingClientRect();
   return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+}
+
+export function drawShape(ctx: CanvasRenderingContext2D, shape: Shape){
+  ctx.strokeStyle = '#111';
+  ctx.lineWidth = 2;
+  ctx.lineJoin = "round";
+
+
 }
 
 export function redraw(
