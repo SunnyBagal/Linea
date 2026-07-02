@@ -15,11 +15,49 @@ export const CreateRoomSchema = z.object({
   slug: z.string().min(3).max(20),
 });
 
-export const ShapeSchema = z.object({
-  type: z.enum(['rect', 'ellipse', 'line', 'arrow', 'text', 'freedraw']),
+const PointSchema = z.object({
   x: z.number(),
-  y: z.number()
+  y: z.number(),
 });
+
+export const ShapeSchema = z.discriminatedUnion('type', [
+  z.object({
+    id: z.string(),
+    type: z.literal('rect'),
+    x: z.number(),
+    y: z.number(),
+    width: z.number(),
+    height: z.number(),
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal('circle'),
+    centerX: z.number(),
+    centerY: z.number(),
+    radius: z.number(),
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal('line'),
+    x1: z.number(),
+    y1: z.number(),
+    x2: z.number(),
+    y2: z.number(),
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal('arrow'),
+    x1: z.number(),
+    y1: z.number(),
+    x2: z.number(),
+    y2: z.number(),
+  }),
+  z.object({
+    id: z.string(),
+    type: z.literal('pencil'),
+    points: z.array(PointSchema).min(2),
+  }),
+]);
 
 const JoinRoomSchema = z.object({
   type: z.literal('join_room'),
@@ -34,7 +72,7 @@ const LeaveRoomSchema = z.object({
 const ChatSchema = z.object({
   type: z.literal('chat'),
   roomId: z.number().int(),
-  message: z.string().min(1).max(2000)
+  message: z.string().min(1).max(100000)
 });
 
 const OpSchema = z.object({

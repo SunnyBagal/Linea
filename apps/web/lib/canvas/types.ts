@@ -1,4 +1,4 @@
-export type Shape =
+export type ShapeGeometry =
   | { 
         type: "rect";
         x: number;
@@ -31,4 +31,8 @@ export type Shape =
       points: { x: number; y: number;}[]
   }
 
-  export type Tool = "rect" | "circle" | "line" | "arrow" | "pencil";
+export type Shape = ShapeGeometry & { id: string };
+
+export type Tool = "rect" | "circle" | "line" | "arrow" | "pencil";
+
+export type Camera = { x: number; y: number; scale: number };
