@@ -5,11 +5,12 @@ import { Shape, Tool, Camera, ShapeGeometry, CanvasOp } from "../../../lib/canva
 import { useSocket } from "../../../hooks/useSocket";
 import {
   redraw, drawShape, buildShape, getCanvasPos, fetchOperations, simplify,
-  screenToWorld, MIN_SCALE, MAX_SCALE,
-  getShapesBounds, applyOp
+  screenToWorld, MIN_SCALE, MAX_SCALE, getShapesBounds, applyOp,
+  hitTest, translateShape,
 } from "../../../lib/canvas/canvas";
 
 const TOOLS: { id: Tool; glyph: string; key: string }[] = [
+  { id: "select", glyph: "⌖", key: "v" },
   { id: "rect", glyph: "▭", key: "r" },
   { id: "circle", glyph: "◯", key: "c" },
   { id: "line", glyph: "╱", key: "l" },
@@ -23,11 +24,12 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const shapesRef = useRef<Shape[]>([]);
   const cameraRef = useRef<Camera>({ x: 0, y: 0, scale: 1 });
+  const selectedIdRef = useRef<string | null>(null);
   const redrawRef = useRef<() => void>(() => {});
   const { socket, loading } = useSocket();
   const zoomToFitRef = useRef<() => void>(() => {});
-  const [tool, setTool] = useState<Tool>("rect");
-  const toolRef = useRef<Tool>("rect");
+  const [tool, setTool] = useState<Tool>("select");
+  const toolRef = useRef<Tool>("select");
   const [zoomPct, setZoomPct] = useState(100);
 
   const selectTool = (t: Tool) => {
@@ -87,7 +89,7 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
 
   useEffect(() => {
     const map: Record<string, Tool> = {
-      r: "rect", c: "circle", l: "line", a: "arrow", p: "pencil",
+      v: "select", r: "rect", c: "circle", l: "line", a: "arrow", p: "pencil",
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.shiftKey && e.code === "Digit1") {
@@ -109,14 +111,15 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
     if (!ctx) return;
     if (!socket || loading) return;
 
-    // Lets the zoom buttons repaint without re-plumbing ctx out of the effect.
+    // Lets the zoom buttons repaint (with selection highlight) without
+    // re-plumbing ctx out of the effect.
     redrawRef.current = () =>
-      redraw(ctx, canvas, shapesRef.current, cameraRef.current);
+      redraw(ctx, canvas, shapesRef.current, cameraRef.current, selectedIdRef.current);
 
     const resize = () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
-      redraw(ctx, canvas, shapesRef.current, cameraRef.current);
+      redraw(ctx, canvas, shapesRef.current, cameraRef.current, selectedIdRef.current);
     };
     resize();
     window.addEventListener("resize", resize);
@@ -133,7 +136,7 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
       opBuffer.length = 0;
       shapesRef.current = shapes;
       hydrating = false;
-      redraw(ctx, canvas, shapesRef.current, cameraRef.current);
+      redraw(ctx, canvas, shapesRef.current, cameraRef.current, selectedIdRef.current);
     };
     loadOps();
 
@@ -153,7 +156,11 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
             return;
           }
           shapesRef.current = applyOp(shapesRef.current, op);
-          redraw(ctx, canvas, shapesRef.current, cameraRef.current);
+          // If someone else deleted the shape we had selected, drop the selection.
+          if (op.opType === "DELETE" && selectedIdRef.current === op.shapeId) {
+            selectedIdRef.current = null;
+          }
+          redraw(ctx, canvas, shapesRef.current, cameraRef.current, selectedIdRef.current);
         }
       } catch {
         // ignore malformed frames
@@ -172,11 +179,34 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
     let lastPanX = 0;
     let lastPanY = 0;
 
+    // ---- drag state (select tool) ----
+    let dragging = false;
+    let dragStartWorld = { x: 0, y: 0 }; // where the grab began, world space
+    let dragOrigShape: Shape | null = null; // snapshot of the shape at grab time
+
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code === "Space" && !spaceHeld) {
         spaceHeld = true;
         if (!panning) canvas.style.cursor = "grab";
         e.preventDefault(); // stop page scroll
+        return;
+      }
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedIdRef.current) {
+        const id = selectedIdRef.current;
+        shapesRef.current = applyOp(shapesRef.current, {
+          opType: "DELETE",
+          shapeId: id,
+          payload: null,
+        });
+        selectedIdRef.current = null;
+        socket.send(JSON.stringify({
+          type: "op",
+          roomId,
+          opType: "DELETE",
+          shapeId: id,
+          payload: null,
+        }));
+        redraw(ctx, canvas, shapesRef.current, cameraRef.current, selectedIdRef.current);
       }
     };
 
@@ -197,24 +227,54 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
         e.preventDefault();
         return;
       }
-      if (e.button !== 0) return; // ignore right-click for drawing
+      if (e.button !== 0) return; // ignore right-click
 
-      drawing = true;
       const { x: sx, y: sy } = getCanvasPos(e, canvas);
       const w = screenToWorld(sx, sy, cameraRef.current);
+
+      // SELECT tool: hit-test, maybe start a drag. Never draws.
+      if (toolRef.current === "select") {
+        const tol = 8 / cameraRef.current.scale; // 8 screen px -> world px
+        const hit = hitTest(shapesRef.current, w.x, w.y, tol);
+        selectedIdRef.current = hit ? hit.id : null;
+        if (hit) {
+          dragging = true;
+          dragStartWorld = { x: w.x, y: w.y };
+          dragOrigShape = hit; // the pre-drag shape; we translate from THIS
+        }
+        redraw(ctx, canvas, shapesRef.current, cameraRef.current, selectedIdRef.current);
+        return;
+      }
+
+      // DRAW tools:
+      drawing = true;
       startX = w.x;
       startY = w.y;
       if (toolRef.current === "pencil") currentPoints = [{ x: w.x, y: w.y }];
     };
 
     const onMove = (e: MouseEvent) => {
+      // Drag a selected shape (select tool).
+      if (dragging && dragOrigShape) {
+        const { x: sx, y: sy } = getCanvasPos(e, canvas);
+        const w = screenToWorld(sx, sy, cameraRef.current);
+        const dx = w.x - dragStartWorld.x;
+        const dy = w.y - dragStartWorld.y;
+        // Translate from the ORIGINAL snapshot by total delta each frame —
+        // avoids floating-point drift from incremental accumulation.
+        const moved = translateShape(dragOrigShape, dx, dy);
+        shapesRef.current = shapesRef.current.map((s) => (s.id === moved.id ? moved : s));
+        redraw(ctx, canvas, shapesRef.current, cameraRef.current, selectedIdRef.current);
+        return;
+      }
+
       if (panning) {
         const cam = cameraRef.current;
         cam.x += e.clientX - lastPanX; // pan delta is screen-space
         cam.y += e.clientY - lastPanY;
         lastPanX = e.clientX;
         lastPanY = e.clientY;
-        redraw(ctx, canvas, shapesRef.current, cam);
+        redraw(ctx, canvas, shapesRef.current, cam, selectedIdRef.current);
         return;
       }
       if (!drawing) return;
@@ -228,16 +288,40 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
         if (!last || (w.x - last.x) ** 2 + (w.y - last.y) ** 2 >= MIN_POINT_DIST_SQ) {
           currentPoints.push({ x: w.x, y: w.y });
         }
-        redraw(ctx, canvas, shapesRef.current, cameraRef.current);
+        redraw(ctx, canvas, shapesRef.current, cameraRef.current, selectedIdRef.current);
         drawShape(ctx, { type: "pencil", points: currentPoints });
       } else {
-        redraw(ctx, canvas, shapesRef.current, cameraRef.current);
+        redraw(ctx, canvas, shapesRef.current, cameraRef.current, selectedIdRef.current);
         const preview = buildShape(t, startX, startY, w.x, w.y);
         if (preview) drawShape(ctx, preview);
       }
     };
 
     const onUp = (e: MouseEvent) => {
+      // Commit a drag as a single UPDATE op.
+      if (dragging && dragOrigShape) {
+        dragging = false;
+        const { x: sx, y: sy } = getCanvasPos(e, canvas);
+        const w = screenToWorld(sx, sy, cameraRef.current);
+        const dx = w.x - dragStartWorld.x;
+        const dy = w.y - dragStartWorld.y;
+        const orig = dragOrigShape;
+        dragOrigShape = null;
+
+        if (dx === 0 && dy === 0) return; // click without moving — just selected
+
+        const moved = translateShape(orig, dx, dy);
+        // Local state already reflects `moved` from onMove; just persist it.
+        socket.send(JSON.stringify({
+          type: "op",
+          roomId,
+          opType: "UPDATE",
+          shapeId: moved.id,
+          payload: moved,
+        }));
+        return;
+      }
+
       if (panning) {
         panning = false;
         canvas.style.cursor = spaceHeld ? "grab" : "crosshair";
@@ -285,7 +369,7 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
         payload: shape,
       }));
 
-      redraw(ctx, canvas, shapesRef.current, cameraRef.current);
+      redraw(ctx, canvas, shapesRef.current, cameraRef.current, selectedIdRef.current);
     };
 
     const onWheel = (e: WheelEvent) => {
@@ -307,7 +391,7 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
         cam.x -= e.deltaX;
         cam.y -= e.deltaY;
       }
-      redraw(ctx, canvas, shapesRef.current, cam);
+      redraw(ctx, canvas, shapesRef.current, cam, selectedIdRef.current);
     };
 
     canvas.addEventListener("mousedown", onDown);

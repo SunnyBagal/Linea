@@ -14,7 +14,7 @@ export function getCanvasPos(e: MouseEvent, canvas: HTMLCanvasElement) {
   return { x: e.clientX - rect.left, y: e.clientY - rect.top };
 }
 
-export function drawShape(ctx: CanvasRenderingContext2D, shape: Shape) {
+export function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeGeometry) {
   ctx.strokeStyle = "#111";
   ctx.lineWidth = 2;
   ctx.lineJoin = "round";
@@ -79,9 +79,9 @@ export function redraw(
   ctx: CanvasRenderingContext2D,
   canvas: HTMLCanvasElement,
   shapes: Shape[],
-  cam: Camera
+  cam: Camera,
+  selectedId?: string | null
 ) {
-
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.setTransform(cam.scale, 0, 0, cam.scale, cam.x, cam.y);
@@ -89,6 +89,10 @@ export function redraw(
   drawGrid(ctx, canvas, cam);
   for (const shape of shapes) drawShape(ctx, shape);
 
+  if (selectedId) {
+    const sel = shapes.find((s) => s.id === selectedId);
+    if (sel) drawSelection(ctx, sel, cam.scale);
+  }
 }
 
 function drawGrid(
@@ -208,6 +212,109 @@ export function getShapesBounds(shapes: Shape[]) {
   return { minX, minY, maxX, maxY };
 }
 
+function distToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax
+  const dy = by - ay
+  if (dx === 0 && dy === 0) {
+    return Math.hypot(px - ax, py - ay);
+  }
+
+  let t = ((px- ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy);
+  t = Math.max(0, Math.min(1, t));
+  const cx = ax + t * dx
+  const cy = ay + t * dy
+  return Math.hypot(px - cx, py-cy )
+}
+
+function hitShape(shape: Shape, wx: number, wy: number, tol: number): boolean {
+  if (shape.type === "rect") {
+    const x1 = Math.min(shape.x, shape.x + shape.width);
+    const x2 = Math.max(shape.x, shape.x + shape.width);
+    const y1 = Math.min(shape.y, shape.y + shape.height);
+    const y2 = Math.max(shape.y, shape.y + shape.height);
+    return wx >= x1 - tol && wx <= x2 + tol && wy >= y1 - tol && wy <= y2 + tol;
+  }
+  if (shape.type === "circle") {
+    const d = Math.hypot(wx - shape.centerX, wy - shape.centerY);
+    return d <= shape.radius + tol; 
+  }
+  if (shape.type === "line" || shape.type === "arrow") {
+    return distToSegment(wx, wy, shape.x1, shape.y1, shape.x2, shape.y2) <= tol;
+  }
+  if (shape.type === "pencil") {
+    for (let i = 0; i < shape.points.length - 1; i++) {
+      const a = shape.points[i]!, b = shape.points[i + 1]!;
+      if (distToSegment(wx, wy, a.x, a.y, b.x, b.y) <= tol) return true;
+    }
+    return false;
+  }
+  return false;
+}
+
+export function hitTest(shapes: Shape[], wx: number, wy: number, tol: number): Shape | null {
+  for (let i = shapes.length - 1; i >= 0; i--) {
+    if (hitShape(shapes[i]!, wx, wy, tol)) {
+      return shapes[i]!;
+    }
+  }
+  return null;
+}
+
+export function translateShape(shape: Shape, dx: number, dy: number): Shape {
+  if (shape.type === "rect") {
+    return { ...shape, x: shape.x + dx, y: shape.y + dy };
+  }
+  if (shape.type === "circle") {
+    return { ...shape, centerX: shape.centerX + dx, centerY: shape.centerY + dy };
+  }
+  if (shape.type === "line" || shape.type === "arrow") {
+    return { ...shape, x1: shape.x1 + dx, y1: shape.y1 + dy, x2: shape.x2 + dx, y2: shape.y2 + dy };
+  }
+  // pencil
+  return { ...shape, points: shape.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) };
+}
+
+function shapeBounds(shape: Shape) {
+  if (shape.type === "rect") {
+    return {
+      minX: Math.min(shape.x, shape.x + shape.width),
+      minY: Math.min(shape.y, shape.y + shape.height),
+      maxX: Math.max(shape.x, shape.x + shape.width),
+      maxY: Math.max(shape.y, shape.y + shape.height),
+    };
+  }
+  if (shape.type === "circle") {
+    return {
+      minX: shape.centerX - shape.radius, minY: shape.centerY - shape.radius,
+      maxX: shape.centerX + shape.radius, maxY: shape.centerY + shape.radius,
+    };
+  }
+  if (shape.type === "line" || shape.type === "arrow") {
+    return {
+      minX: Math.min(shape.x1, shape.x2), minY: Math.min(shape.y1, shape.y2),
+      maxX: Math.max(shape.x1, shape.x2), maxY: Math.max(shape.y1, shape.y2),
+    };
+  }
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of shape.points) {
+    if (p.x < minX) minX = p.x; if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x; if (p.y > maxY) maxY = p.y;
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+export function drawSelection(ctx: CanvasRenderingContext2D, shape: Shape, scale: number) {
+  const b = shapeBounds(shape);
+  const pad = 6 / scale;
+  ctx.save();
+  ctx.strokeStyle = "#a6ff5e";
+  ctx.lineWidth = 1.5 / scale;
+  ctx.setLineDash([6 / scale, 4 / scale]);
+  ctx.strokeRect(b.minX - pad, b.minY - pad, (b.maxX - b.minX) + pad * 2, (b.maxY - b.minY) + pad * 2);
+  ctx.restore();
+}
+
+
 export function applyOp(shapes: Shape[], op: CanvasOp): Shape[] {
   if (op.opType === "CREATE"){
     const next = op.payload;
@@ -238,7 +345,7 @@ export function applyOp(shapes: Shape[], op: CanvasOp): Shape[] {
 
 export async function fetchOperations(roomId: number): Promise<CanvasOp[]> {
   const token = localStorage.getItem("token") ?? "";
-  const res = await fetch(`${BACKEND_URL}/chats/${roomId}`, {
+  const res = await fetch(`${BACKEND_URL}/operations/${roomId}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
 
@@ -261,6 +368,4 @@ export async function fetchOperations(roomId: number): Promise<CanvasOp[]> {
     shapeId: row.shapeId,
     payload: row.payload ?? null,
   }));
-
-  
 }

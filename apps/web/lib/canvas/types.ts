@@ -33,7 +33,7 @@ export type ShapeGeometry =
 
 export type Shape = ShapeGeometry & { id: string };
 
-export type Tool = "rect" | "circle" | "line" | "arrow" | "pencil";
+export type Tool = "select" | "rect" | "circle" | "line" | "arrow" | "pencil";
 
 export type Camera = { x: number; y: number; scale: number };
 
