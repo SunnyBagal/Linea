@@ -1,4 +1,4 @@
-import { Shape, ShapeGeometry, Tool, Camera } from "./types";
+import { Shape, ShapeGeometry, Tool, Camera, CanvasOp, OpType } from "./types";
 import { BACKEND_URL } from "../../config";
 
 export const MIN_SCALE = 0.1;
@@ -81,15 +81,14 @@ export function redraw(
   shapes: Shape[],
   cam: Camera
 ) {
-  // Clear in screen space (identity), then switch to world space.
+
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.setTransform(cam.scale, 0, 0, cam.scale, cam.x, cam.y);
 
   drawGrid(ctx, canvas, cam);
   for (const shape of shapes) drawShape(ctx, shape);
-  // NOTE: transform is left applied on exit, so the live preview
-  // in onMove draws in world space through the same transform.
+
 }
 
 function drawGrid(
@@ -102,7 +101,6 @@ function drawGrid(
   const right = (canvas.width - cam.x) / cam.scale;
   const bottom = (canvas.height - cam.y) / cam.scale;
 
-  // Level-of-detail: double the step until the visible line count is sane.
   let step = GRID_SIZE;
   while ((right - left) / step > 80) step *= 2;
 
@@ -110,7 +108,7 @@ function drawGrid(
   const startY = Math.floor(top / step) * step;
 
   ctx.strokeStyle = "rgba(0,0,0,0.06)";
-  ctx.lineWidth = 1 / cam.scale; // constant ~1px regardless of zoom
+  ctx.lineWidth = 1 / cam.scale; 
   ctx.beginPath();
   for (let x = startX; x <= right; x += step) {
     ctx.moveTo(x, top);
@@ -210,15 +208,42 @@ export function getShapesBounds(shapes: Shape[]) {
   return { minX, minY, maxX, maxY };
 }
 
+export function applyOp(shapes: Shape[], op: CanvasOp): Shape[] {
+  if (op.opType === "CREATE"){
+    const next = op.payload;
+    if (!next) {
+      return shapes;
+    }
+    if (shapes.some((s) => s.id === op.shapeId)) {
+      return shapes;
+    }
+    return [...shapes, next];
+  }
 
-export async function fetchShapes(roomId: number): Promise<Shape[]> {
+  if (op.opType === "UPDATE") {
+    const next = op.payload;
+    if (!next) {
+      return shapes;
+    }
+    return shapes.map((s) => (s.id === op.shapeId ? next : s));
+  }
+
+  if (op.opType === "DELETE"){
+    return shapes.filter((s) => s.id !== op.shapeId);
+  }
+  return shapes;
+
+}
+
+
+export async function fetchOperations(roomId: number): Promise<CanvasOp[]> {
   const token = localStorage.getItem("token") ?? "";
   const res = await fetch(`${BACKEND_URL}/chats/${roomId}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
 
   if (!res.ok) {
-    console.error(`fetchShapes ${roomId} failed: ${res.status} ${res.statusText}`);
+    console.error(`fetchOperations ${roomId} failed: ${res.status} ${res.statusText}`);
     if (res.status === 401) {
       localStorage.removeItem("token");
     }
@@ -227,16 +252,15 @@ export async function fetchShapes(roomId: number): Promise<Shape[]> {
 
   const data = await res.json();
 
-  const shapes: Shape[] = [];
-  for (const m of data.messages) {
-    try {
-      const parsed = JSON.parse(m.message);
-      if (typeof parsed.id !== "string") parsed.id = crypto.randomUUID();
-      shapes.push(parsed);
-    } catch {
-      // skip non-JSON legacy rows
-    }
-  }
+  return (data.operations ?? []).map((row : { 
+    type: OpType;
+    shapeId: string;
+    payload: Shape | null 
+  }) => ({
+    opType: row.type,
+    shapeId: row.shapeId,
+    payload: row.payload ?? null,
+  }));
+
   
-  return shapes;
 }

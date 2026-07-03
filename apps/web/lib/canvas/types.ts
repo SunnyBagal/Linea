@@ -36,3 +36,11 @@ export type Shape = ShapeGeometry & { id: string };
 export type Tool = "rect" | "circle" | "line" | "arrow" | "pencil";
 
 export type Camera = { x: number; y: number; scale: number };
+
+export type OpType = "CREATE" | "UPDATE" | "DELETE"
+
+export type CanvasOp = {
+  opType: OpType;
+  shapeId: string;
+  payload: Shape | null
+}

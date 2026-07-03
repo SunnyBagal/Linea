@@ -171,6 +171,41 @@ app.get("/chats/:roomId", authMiddleware, async (req, res) => {
   }
 });
 
+app.get("/operations/:roomId", authMiddleware, async (req, res) => {
+  const roomId = Number(req.params.roomId);
+  if (Number.isNaN(roomId)){
+    return res.status(400).json({
+      message: "Invalid room Id",
+    });
+  }
+
+  try{
+    const operations = await prisma.operation.findMany({
+      where: { roomId },
+      orderBy: { seq: "asc" },
+      select: {
+        seq: true, 
+        type: true,
+        shapeId: true,
+        payload: true
+      }
+    })
+
+    return res.json({
+      operations
+    });
+
+  } catch( err ){
+    console.error(err);
+    return res.status(500).json({
+      message: "Could not fetch operations."
+    });
+  }
+
+})
+
+
+
 app.get("/room/:slug", authMiddleware, async (req, res) => {
   const slug = req.params.slug;
   if (typeof slug !== "string") {

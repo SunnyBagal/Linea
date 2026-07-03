@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Shape, Tool, Camera, ShapeGeometry } from "../../../lib/canvas/types";
+import { Shape, Tool, Camera, ShapeGeometry, CanvasOp } from "../../../lib/canvas/types";
 import { useSocket } from "../../../hooks/useSocket";
 import {
-  redraw, drawShape, buildShape, getCanvasPos, fetchShapes, simplify,
+  redraw, drawShape, buildShape, getCanvasPos, fetchOperations, simplify,
   screenToWorld, MIN_SCALE, MAX_SCALE,
-  getShapesBounds
+  getShapesBounds, applyOp
 } from "../../../lib/canvas/canvas";
 
 const TOOLS: { id: Tool; glyph: string; key: string }[] = [
@@ -121,21 +121,38 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
     resize();
     window.addEventListener("resize", resize);
 
-    const loadShapes = async () => {
-      const shapes = await fetchShapes(roomId);
+    // Hydration buffers live ops that land during the fetch, then flushes them.
+    let hydrating = true;
+    const opBuffer: CanvasOp[] = [];
+
+    const loadOps = async () => {
+      const ops = await fetchOperations(roomId);
+      let shapes: Shape[] = [];
+      for (const op of ops) shapes = applyOp(shapes, op);        // replay the log
+      for (const op of opBuffer) shapes = applyOp(shapes, op);   // flush race-window ops
+      opBuffer.length = 0;
       shapesRef.current = shapes;
+      hydrating = false;
       redraw(ctx, canvas, shapesRef.current, cameraRef.current);
     };
-    loadShapes();
+    loadOps();
 
     socket.send(JSON.stringify({ type: "join_room", roomId }));
 
     const onSocketMessage = (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
-        if (data.type === "chat") {
-          const shape: Shape = JSON.parse(data.message);
-          shapesRef.current.push(shape);
+        if (data.type === "op") {
+          const op: CanvasOp = {
+            opType: data.opType,
+            shapeId: data.shapeId,
+            payload: data.payload ?? null,
+          };
+          if (hydrating) {
+            opBuffer.push(op); // not ready — queue until replay finishes
+            return;
+          }
+          shapesRef.current = applyOp(shapesRef.current, op);
           redraw(ctx, canvas, shapesRef.current, cameraRef.current);
         }
       } catch {
@@ -162,7 +179,7 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
         e.preventDefault(); // stop page scroll
       }
     };
-    
+
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.code === "Space") {
         spaceHeld = false;
@@ -232,7 +249,7 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
       const { x: sx, y: sy } = getCanvasPos(e, canvas);
       const w = screenToWorld(sx, sy, cameraRef.current);
       const t = toolRef.current;
-      
+
       let geometry: ShapeGeometry | null = null;
 
       if (t === "pencil") {
@@ -248,15 +265,26 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
       }
 
       if (!geometry) return;
+
       // Identity assigned exactly once, here at commit.
       const shape: Shape = { ...geometry, id: crypto.randomUUID() };
 
-      shapesRef.current.push(shape);
+      // Optimistic local apply — the server excludes the sender from broadcast,
+      // so we never get our own op echoed back.
+      shapesRef.current = applyOp(shapesRef.current, {
+        opType: "CREATE",
+        shapeId: shape.id,
+        payload: shape,
+      });
+
       socket.send(JSON.stringify({
-        type: "chat",
+        type: "op",
         roomId,
-        message: JSON.stringify(shape),
+        opType: "CREATE",
+        shapeId: shape.id,
+        payload: shape,
       }));
+
       redraw(ctx, canvas, shapesRef.current, cameraRef.current);
     };
 
