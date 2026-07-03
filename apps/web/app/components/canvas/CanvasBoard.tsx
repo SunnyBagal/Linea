@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Shape, Tool, Camera } from "../../../lib/canvas/types";
+import { Shape, Tool, Camera, ShapeGeometry } from "../../../lib/canvas/types";
 import { useSocket } from "../../../hooks/useSocket";
 import {
   redraw, drawShape, buildShape, getCanvasPos, fetchShapes, simplify,
   screenToWorld, MIN_SCALE, MAX_SCALE,
-  getShapesBounds,
+  getShapesBounds
 } from "../../../lib/canvas/canvas";
 
 const TOOLS: { id: Tool; glyph: string; key: string }[] = [
@@ -232,22 +232,24 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
       const { x: sx, y: sy } = getCanvasPos(e, canvas);
       const w = screenToWorld(sx, sy, cameraRef.current);
       const t = toolRef.current;
-
-      let shape: Shape | null = null;
+      
+      let geometry: ShapeGeometry | null = null;
 
       if (t === "pencil") {
         if (currentPoints.length < 2) {
           currentPoints = [];
           return;
         }
-        shape = { type: "pencil", points: simplify(currentPoints, 2.5) };
+        geometry = { type: "pencil", points: simplify(currentPoints, 2.5) };
         currentPoints = [];
       } else {
         if (w.x === startX && w.y === startY) return;
-        shape = buildShape(t, startX, startY, w.x, w.y);
+        geometry = buildShape(t, startX, startY, w.x, w.y);
       }
 
-      if (!shape) return;
+      if (!geometry) return;
+      // Identity assigned exactly once, here at commit.
+      const shape: Shape = { ...geometry, id: crypto.randomUUID() };
 
       shapesRef.current.push(shape);
       socket.send(JSON.stringify({

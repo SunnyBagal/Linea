@@ -1,4 +1,4 @@
-import { Shape, Tool, Camera } from "./types";
+import { Shape, ShapeGeometry, Tool, Camera } from "./types";
 import { BACKEND_URL } from "../../config";
 
 export const MIN_SCALE = 0.1;
@@ -129,7 +129,7 @@ export function buildShape(
   sy: number,
   x: number,
   y: number
-): Shape | null {
+): ShapeGeometry | null {
 
   if (tool === "rect") {
     return { type: "rect", x: sx, y: sy, width: x - sx, height: y - sy };
@@ -230,10 +230,13 @@ export async function fetchShapes(roomId: number): Promise<Shape[]> {
   const shapes: Shape[] = [];
   for (const m of data.messages) {
     try {
-      shapes.push(JSON.parse(m.message));
+      const parsed = JSON.parse(m.message);
+      if (typeof parsed.id !== "string") parsed.id = crypto.randomUUID();
+      shapes.push(parsed);
     } catch {
-      // skip 
+      // skip non-JSON legacy rows
     }
   }
+  
   return shapes;
 }
