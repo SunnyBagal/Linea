@@ -76,6 +76,7 @@ wss.on('connection', (ws, request) => {
     const result = WsMessageSchema.safeParse(parsed);
     if (!result.success){
       console.log("WS frome rejected: ", result.error.issues);
+      console.log(" raw frame was:", raw.toString());
       return;
     }
     const msg = result.data; 

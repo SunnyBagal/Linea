@@ -8,6 +8,7 @@ import {
   screenToWorld, MIN_SCALE, MAX_SCALE, getShapesBounds, applyOp,
   hitTest, translateShape, stateAtSeq,setTheme, getThemeBg, type Theme,
 } from "../../../lib/canvas/canvas";
+import { useRouter } from "next/navigation";
 
 const TOOLS: { id: Tool; glyph: string; key: string }[] = [
   { id: "select", glyph: "⌖", key: "v" },
@@ -21,6 +22,7 @@ const TOOLS: { id: Tool; glyph: string; key: string }[] = [
 const MIN_POINT_DIST_SQ = 4;
 
 export default function CanvasBoard({ roomId }: { roomId: number }) {
+  const router = useRouter();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const shapesRef = useRef<Shape[]>([]);
   const cameraRef = useRef<Camera>({ x: 0, y: 0, scale: 1 });
@@ -41,10 +43,7 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
   // Menu (Excalidraw-style hamburger). Time-travel lives inside it for now;
   // dashboard / user / theme / logout will join it later.
   const [menuOpen, setMenuOpen] = useState(false);
-  const [theme, setThemeState] = useState<Theme>(() => {
-    if (typeof window === "undefined") return "dark";
-    return (localStorage.getItem("linea-theme") as Theme) || "dark";
-  });
+  const [theme, setThemeState] = useState<Theme>("dark"); // fixed for SSR match
 
   const toggleTheme = () => setThemeState((t) => (t === "dark" ? "light" : "dark"));
 
@@ -144,11 +143,21 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
     redrawRef.current();
   };
 
+  // On mount (client only), load the saved theme.
+  useEffect(() => {
+    const saved = localStorage.getItem("linea-theme") as Theme | null;
+    if (saved && saved !== theme) setThemeState(saved);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // run once
+
+  // Apply theme to the canvas palette, persist, repaint.
   useEffect(() => {
     setTheme(theme);
     localStorage.setItem("linea-theme", theme);
     redrawRef.current();
-    
+  }, [theme]);
+
+  useEffect(() => {
     const map: Record<string, Tool> = {
       v: "select", r: "rect", c: "circle", l: "line", a: "arrow", p: "pencil",
     };
@@ -164,7 +173,7 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [theme]);
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -325,7 +334,7 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
     };
 
     const onDown = (e: MouseEvent) => {
-      // Pan works even in travel mode (panning the past is fine).
+      setMenuOpen(false);
       if (e.button === 1 || spaceHeld) {
         panning = true;
         lastPanX = e.clientX;
@@ -335,8 +344,7 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
         return;
       }
       if (e.button !== 0) return;
-
-      // Read-only past: no drawing, no selecting.
+      
       if (travelActiveRef.current) return;
 
       const { x: sx, y: sy } = getCanvasPos(e, canvas);
@@ -414,6 +422,12 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
         if (dx === 0 && dy === 0) return;
 
         const moved = translateShape(orig, dx, dy);
+        if (!moved.id){
+          console.warn(
+            "drag: shape has no id, skipping Update", moved
+          );
+          return
+        }
         undoStackRef.current.push({ opType: "UPDATE", shapeId: orig.id, payload: orig });
         // Local state already reflects `moved`; record in log + broadcast.
         opLogRef.current.push({ opType: "UPDATE", shapeId: moved.id, payload: moved, seq: undefined });
@@ -507,14 +521,14 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
       <button
         onClick={() => setMenuOpen((v) => !v)}
         title="Menu"
-        className="fixed left-4 top-4 h-9 w-9 rounded-lg bg-[#0e1110] text-neutral-200 shadow-lg ring-1 ring-white/10 hover:bg-white/10"
+        className="fixed left-4 top-4 flex h-9 w-9 items-center justify-center rounded-lg bg-[#0e1110] text-lg leading-none text-neutral-200 shadow-lg ring-1 ring-white/10 hover:bg-white/10"
       >
         ☰
       </button>
 
       {menuOpen && (
         <div className="fixed left-4 top-16 w-64 rounded-xl bg-[#0e1110] p-3 text-neutral-200 shadow-xl ring-1 ring-white/10">
-          {/* Time travel */}
+
           <div className="flex items-center justify-between">
             <span className="text-sm">Time travel</span>
             <button
@@ -547,7 +561,13 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
 
           {/* Placeholders — wired in the dashboard/theme step */}
           <div className="mt-3 space-y-1 border-t border-white/10 pt-3 text-sm text-neutral-500">
-            <div className="cursor-not-allowed">Dashboard (soon)</div>
+                      
+            <button
+              onClick={() => router.push("/dashboard")}
+              className="block w-full text-left text-neutral-200 hover:text-white"
+            >
+              Dashboard
+            </button>
             <button
               onClick={toggleTheme}
               className="flex w-full items-center justify-between text-left text-neutral-200 hover:text-white"
@@ -557,8 +577,15 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
                 {theme === "dark" ? "Dark" : "Light"}
               </span>
             </button>
-            <div className="cursor-not-allowed">Account (soon)</div>
-            <div className="cursor-not-allowed">Log out (soon)</div>
+            <button
+              onClick={() => {
+                localStorage.removeItem("token");
+                router.push("/signin");
+              }}
+              className="block w-full text-left text-neutral-400 hover:text-white"
+            >
+              Log out
+            </button>
           </div>
         </div>
       )}

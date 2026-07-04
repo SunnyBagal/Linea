@@ -20,37 +20,51 @@ const PointSchema = z.object({
   y: z.number(),
 });
 
+export const ShapeGeometrySchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('rect'),
+    x: z.number(), y: z.number(),
+    width: z.number(), height: z.number(),
+  }),
+  z.object({
+    type: z.literal('circle'),
+    centerX: z.number(), centerY: z.number(), radius: z.number(),
+  }),
+  z.object({
+    type: z.literal('line'),
+    x1: z.number(), y1: z.number(), x2: z.number(), y2: z.number(),
+  }),
+  z.object({
+    type: z.literal('arrow'),
+    x1: z.number(), y1: z.number(), x2: z.number(), y2: z.number(),
+  }),
+  z.object({
+    type: z.literal('pencil'),
+    points: z.array(PointSchema).min(2),
+  }),
+]);
+
 export const ShapeSchema = z.discriminatedUnion('type', [
   z.object({
     id: z.string(),
     type: z.literal('rect'),
-    x: z.number(),
-    y: z.number(),
-    width: z.number(),
-    height: z.number(),
+    x: z.number(), y: z.number(),
+    width: z.number(), height: z.number(),
   }),
   z.object({
     id: z.string(),
     type: z.literal('circle'),
-    centerX: z.number(),
-    centerY: z.number(),
-    radius: z.number(),
+    centerX: z.number(), centerY: z.number(), radius: z.number(),
   }),
   z.object({
     id: z.string(),
     type: z.literal('line'),
-    x1: z.number(),
-    y1: z.number(),
-    x2: z.number(),
-    y2: z.number(),
+    x1: z.number(), y1: z.number(), x2: z.number(), y2: z.number(),
   }),
   z.object({
     id: z.string(),
     type: z.literal('arrow'),
-    x1: z.number(),
-    y1: z.number(),
-    x2: z.number(),
-    y2: z.number(),
+    x1: z.number(), y1: z.number(), x2: z.number(), y2: z.number(),
   }),
   z.object({
     id: z.string(),
@@ -58,6 +72,7 @@ export const ShapeSchema = z.discriminatedUnion('type', [
     points: z.array(PointSchema).min(2),
   }),
 ]);
+
 
 const JoinRoomSchema = z.object({
   type: z.literal('join_room'),
@@ -92,3 +107,5 @@ export const WsMessageSchema = z.discriminatedUnion('type', [
 
 export type WsMessage = z.infer<typeof WsMessageSchema>;
 export type OpMessage = z.infer<typeof OpSchema>;
+export type ShapeGeometry = z.infer<typeof ShapeGeometrySchema>;
+export type Shape = z.infer<typeof ShapeSchema>;
