@@ -6,7 +6,7 @@ import { useSocket } from "../../../hooks/useSocket";
 import {
   redraw, drawShape, buildShape, getCanvasPos, fetchOperations, simplify,
   screenToWorld, MIN_SCALE, MAX_SCALE, getShapesBounds, applyOp,
-  hitTest, translateShape,
+  hitTest, translateShape, stateAtSeq,setTheme, getThemeBg, type Theme,
 } from "../../../lib/canvas/canvas";
 
 const TOOLS: { id: Tool; glyph: string; key: string }[] = [
@@ -28,9 +28,32 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
   const redrawRef = useRef<() => void>(() => {});
   const { socket, loading } = useSocket();
   const zoomToFitRef = useRef<() => void>(() => {});
+  const undoStackRef = useRef<CanvasOp[]>([]);
+
+  // The in-memory op-log: ordered, seq-stamped. Hydration fills it; live ops
+  // and our own acks append to it. Time-travel folds prefixes of this.
+  const opLogRef = useRef<CanvasOp[]>([]);
+
   const [tool, setTool] = useState<Tool>("select");
   const toolRef = useRef<Tool>("select");
   const [zoomPct, setZoomPct] = useState(100);
+
+  // Menu (Excalidraw-style hamburger). Time-travel lives inside it for now;
+  // dashboard / user / theme / logout will join it later.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [theme, setThemeState] = useState<Theme>(() => {
+    if (typeof window === "undefined") return "dark";
+    return (localStorage.getItem("linea-theme") as Theme) || "dark";
+  });
+
+  const toggleTheme = () => setThemeState((t) => (t === "dark" ? "light" : "dark"));
+
+  // Time-travel: state drives the slider UI, refs drive the canvas handlers.
+  const [travelActive, setTravelActive] = useState(false);
+  const [travelSeq, setTravelSeq] = useState(0);
+  const [maxSeq, setMaxSeq] = useState(0);
+  const travelActiveRef = useRef(false);
+  const travelSeqRef = useRef(0);
 
   const selectTool = (t: Tool) => {
     setTool(t);
@@ -62,10 +85,13 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
   const zoomToFit = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const bounds = getShapesBounds(shapesRef.current);
-    if (!bounds) { resetZoom(); return; } // empty board → home
+    const shapes = travelActiveRef.current
+      ? stateAtSeq(opLogRef.current, travelSeqRef.current)
+      : shapesRef.current;
+    const bounds = getShapesBounds(shapes);
+    if (!bounds) { resetZoom(); return; }
 
-    const pad = 80; // screen-px breathing room around content
+    const pad = 80;
     const contentW = Math.max(1, bounds.maxX - bounds.minX);
     const contentH = Math.max(1, bounds.maxY - bounds.minY);
     const scale = Math.min(
@@ -79,7 +105,7 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
     const cy = (bounds.minY + bounds.maxY) / 2;
     cameraRef.current = {
       scale,
-      x: canvas.width / 2 - cx * scale,  // center content in viewport
+      x: canvas.width / 2 - cx * scale,
       y: canvas.height / 2 - cy * scale,
     };
     setZoomPct(Math.round(scale * 100));
@@ -87,7 +113,42 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
   };
   zoomToFitRef.current = zoomToFit;
 
+  // Highest seq present in the log (current head).
+  const currentMaxSeq = () => {
+    const log = opLogRef.current;
+    let m = 0;
+    for (const op of log) if (op.seq !== undefined && op.seq > m) m = op.seq;
+    return m;
+  };
+
+  const enterTravel = () => {
+    const max = currentMaxSeq();
+    setMaxSeq(max);
+    setTravelSeq(max);
+    travelSeqRef.current = max;
+    setTravelActive(true);
+    travelActiveRef.current = true;
+    selectedIdRef.current = null; // no selection in read-only past
+    redrawRef.current();
+  };
+
+  const exitTravel = () => {
+    setTravelActive(false);
+    travelActiveRef.current = false;
+    redrawRef.current(); // snap back to live head (which may include others' ops)
+  };
+
+  const onScrub = (n: number) => {
+    setTravelSeq(n);
+    travelSeqRef.current = n;
+    redrawRef.current();
+  };
+
   useEffect(() => {
+    setTheme(theme);
+    localStorage.setItem("linea-theme", theme);
+    redrawRef.current();
+    
     const map: Record<string, Tool> = {
       v: "select", r: "rect", c: "circle", l: "line", a: "arrow", p: "pencil",
     };
@@ -97,12 +158,13 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
         zoomToFitRef.current();
         return;
       }
+      if (travelActiveRef.current) return; // tools disabled while viewing the past
       const t = map[e.key.toLowerCase()];
       if (t) selectTool(t);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [theme]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -111,15 +173,20 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
     if (!ctx) return;
     if (!socket || loading) return;
 
-    // Lets the zoom buttons repaint (with selection highlight) without
-    // re-plumbing ctx out of the effect.
-    redrawRef.current = () =>
-      redraw(ctx, canvas, shapesRef.current, cameraRef.current, selectedIdRef.current);
+    // Central repaint: in travel mode, paint the folded prefix; else live shapes.
+    redrawRef.current = () => {
+      const shapes = travelActiveRef.current
+        ? stateAtSeq(opLogRef.current, travelSeqRef.current)
+        : shapesRef.current;
+      // Selection highlight only in live mode.
+      const sel = travelActiveRef.current ? null : selectedIdRef.current;
+      redraw(ctx, canvas, shapes, cameraRef.current, sel);
+    };
 
     const resize = () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
-      redraw(ctx, canvas, shapesRef.current, cameraRef.current, selectedIdRef.current);
+      redrawRef.current();
     };
     resize();
     window.addEventListener("resize", resize);
@@ -130,13 +197,17 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
 
     const loadOps = async () => {
       const ops = await fetchOperations(roomId);
+      opLogRef.current = [...ops];        // seed the in-memory log
       let shapes: Shape[] = [];
-      for (const op of ops) shapes = applyOp(shapes, op);        // replay the log
-      for (const op of opBuffer) shapes = applyOp(shapes, op);   // flush race-window ops
+      for (const op of ops) shapes = applyOp(shapes, op);
+      for (const op of opBuffer) {
+        opLogRef.current.push(op);
+        shapes = applyOp(shapes, op);
+      }
       opBuffer.length = 0;
       shapesRef.current = shapes;
       hydrating = false;
-      redraw(ctx, canvas, shapesRef.current, cameraRef.current, selectedIdRef.current);
+      redrawRef.current();
     };
     loadOps();
 
@@ -145,22 +216,37 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
     const onSocketMessage = (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
+
+        // Ack for one of OUR ops: backfill the server-assigned seq in the log.
+        if (data.type === "op_ack") {
+          const entry = opLogRef.current.find(
+            (o) => o.shapeId === data.shapeId && o.seq === undefined
+          );
+          if (entry) entry.seq = data.seq;
+          return;
+        }
+
         if (data.type === "op") {
           const op: CanvasOp = {
             opType: data.opType,
             shapeId: data.shapeId,
             payload: data.payload ?? null,
+            seq: data.seq,
           };
           if (hydrating) {
-            opBuffer.push(op); // not ready — queue until replay finishes
+            opBuffer.push(op);
             return;
           }
+          // Always record in the log (so it's on the timeline)...
+          opLogRef.current.push(op);
+          // ...and fold into live state.
           shapesRef.current = applyOp(shapesRef.current, op);
-          // If someone else deleted the shape we had selected, drop the selection.
           if (op.opType === "DELETE" && selectedIdRef.current === op.shapeId) {
             selectedIdRef.current = null;
           }
-          redraw(ctx, canvas, shapesRef.current, cameraRef.current, selectedIdRef.current);
+          // If we're viewing the past, don't disturb the frozen frame — the op
+          // is in the log and will be there when we exit travel.
+          if (!travelActiveRef.current) redrawRef.current();
         }
       } catch {
         // ignore malformed frames
@@ -168,7 +254,28 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
     };
     socket.addEventListener("message", onSocketMessage);
 
-    // ---- interaction state (all in world coords except pan bookkeeping) ----
+    // Apply locally + broadcast + record in the log (seq backfilled by ack).
+    const emitOp = (op: CanvasOp) => {
+      shapesRef.current = applyOp(shapesRef.current, op);
+      opLogRef.current.push({ ...op, seq: undefined }); // awaiting ack
+      socket.send(JSON.stringify({
+        type: "op",
+        roomId,
+        opType: op.opType,
+        shapeId: op.shapeId,
+        payload: op.payload,
+      }));
+    };
+
+    const doUndo = () => {
+      const inverse = undoStackRef.current.pop();
+      if (!inverse) return;
+      selectedIdRef.current = null;
+      emitOp(inverse);
+      redrawRef.current();
+    };
+
+    // ---- interaction state ----
     let drawing = false;
     let startX = 0;
     let startY = 0;
@@ -179,34 +286,34 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
     let lastPanX = 0;
     let lastPanY = 0;
 
-    // ---- drag state (select tool) ----
     let dragging = false;
-    let dragStartWorld = { x: 0, y: 0 }; // where the grab began, world space
-    let dragOrigShape: Shape | null = null; // snapshot of the shape at grab time
+    let dragStartWorld = { x: 0, y: 0 };
+    let dragOrigShape: Shape | null = null;
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code === "Space" && !spaceHeld) {
         spaceHeld = true;
         if (!panning) canvas.style.cursor = "grab";
-        e.preventDefault(); // stop page scroll
+        e.preventDefault();
         return;
       }
+
+      if (travelActiveRef.current) return; // editing disabled in the past
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        doUndo();
+        return;
+      }
+
       if ((e.key === "Delete" || e.key === "Backspace") && selectedIdRef.current) {
         const id = selectedIdRef.current;
-        shapesRef.current = applyOp(shapesRef.current, {
-          opType: "DELETE",
-          shapeId: id,
-          payload: null,
-        });
+        const deleted = shapesRef.current.find((s) => s.id === id);
+        if (!deleted) return;
+        undoStackRef.current.push({ opType: "CREATE", shapeId: id, payload: deleted });
         selectedIdRef.current = null;
-        socket.send(JSON.stringify({
-          type: "op",
-          roomId,
-          opType: "DELETE",
-          shapeId: id,
-          payload: null,
-        }));
-        redraw(ctx, canvas, shapesRef.current, cameraRef.current, selectedIdRef.current);
+        emitOp({ opType: "DELETE", shapeId: id, payload: null });
+        redrawRef.current();
       }
     };
 
@@ -218,7 +325,7 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
     };
 
     const onDown = (e: MouseEvent) => {
-      // Pan: middle mouse OR space-drag.
+      // Pan works even in travel mode (panning the past is fine).
       if (e.button === 1 || spaceHeld) {
         panning = true;
         lastPanX = e.clientX;
@@ -227,26 +334,27 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
         e.preventDefault();
         return;
       }
-      if (e.button !== 0) return; // ignore right-click
+      if (e.button !== 0) return;
+
+      // Read-only past: no drawing, no selecting.
+      if (travelActiveRef.current) return;
 
       const { x: sx, y: sy } = getCanvasPos(e, canvas);
       const w = screenToWorld(sx, sy, cameraRef.current);
 
-      // SELECT tool: hit-test, maybe start a drag. Never draws.
       if (toolRef.current === "select") {
-        const tol = 8 / cameraRef.current.scale; // 8 screen px -> world px
+        const tol = 8 / cameraRef.current.scale;
         const hit = hitTest(shapesRef.current, w.x, w.y, tol);
         selectedIdRef.current = hit ? hit.id : null;
         if (hit) {
           dragging = true;
           dragStartWorld = { x: w.x, y: w.y };
-          dragOrigShape = hit; // the pre-drag shape; we translate from THIS
+          dragOrigShape = hit;
         }
-        redraw(ctx, canvas, shapesRef.current, cameraRef.current, selectedIdRef.current);
+        redrawRef.current();
         return;
       }
 
-      // DRAW tools:
       drawing = true;
       startX = w.x;
       startY = w.y;
@@ -254,27 +362,24 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
     };
 
     const onMove = (e: MouseEvent) => {
-      // Drag a selected shape (select tool).
       if (dragging && dragOrigShape) {
         const { x: sx, y: sy } = getCanvasPos(e, canvas);
         const w = screenToWorld(sx, sy, cameraRef.current);
         const dx = w.x - dragStartWorld.x;
         const dy = w.y - dragStartWorld.y;
-        // Translate from the ORIGINAL snapshot by total delta each frame —
-        // avoids floating-point drift from incremental accumulation.
         const moved = translateShape(dragOrigShape, dx, dy);
         shapesRef.current = shapesRef.current.map((s) => (s.id === moved.id ? moved : s));
-        redraw(ctx, canvas, shapesRef.current, cameraRef.current, selectedIdRef.current);
+        redrawRef.current();
         return;
       }
 
       if (panning) {
         const cam = cameraRef.current;
-        cam.x += e.clientX - lastPanX; // pan delta is screen-space
+        cam.x += e.clientX - lastPanX;
         cam.y += e.clientY - lastPanY;
         lastPanX = e.clientX;
         lastPanY = e.clientY;
-        redraw(ctx, canvas, shapesRef.current, cam, selectedIdRef.current);
+        redrawRef.current();
         return;
       }
       if (!drawing) return;
@@ -288,17 +393,16 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
         if (!last || (w.x - last.x) ** 2 + (w.y - last.y) ** 2 >= MIN_POINT_DIST_SQ) {
           currentPoints.push({ x: w.x, y: w.y });
         }
-        redraw(ctx, canvas, shapesRef.current, cameraRef.current, selectedIdRef.current);
+        redrawRef.current();
         drawShape(ctx, { type: "pencil", points: currentPoints });
       } else {
-        redraw(ctx, canvas, shapesRef.current, cameraRef.current, selectedIdRef.current);
+        redrawRef.current();
         const preview = buildShape(t, startX, startY, w.x, w.y);
         if (preview) drawShape(ctx, preview);
       }
     };
 
     const onUp = (e: MouseEvent) => {
-      // Commit a drag as a single UPDATE op.
       if (dragging && dragOrigShape) {
         dragging = false;
         const { x: sx, y: sy } = getCanvasPos(e, canvas);
@@ -307,11 +411,12 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
         const dy = w.y - dragStartWorld.y;
         const orig = dragOrigShape;
         dragOrigShape = null;
-
-        if (dx === 0 && dy === 0) return; // click without moving — just selected
+        if (dx === 0 && dy === 0) return;
 
         const moved = translateShape(orig, dx, dy);
-        // Local state already reflects `moved` from onMove; just persist it.
+        undoStackRef.current.push({ opType: "UPDATE", shapeId: orig.id, payload: orig });
+        // Local state already reflects `moved`; record in log + broadcast.
+        opLogRef.current.push({ opType: "UPDATE", shapeId: moved.id, payload: moved, seq: undefined });
         socket.send(JSON.stringify({
           type: "op",
           roomId,
@@ -337,10 +442,7 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
       let geometry: ShapeGeometry | null = null;
 
       if (t === "pencil") {
-        if (currentPoints.length < 2) {
-          currentPoints = [];
-          return;
-        }
+        if (currentPoints.length < 2) { currentPoints = []; return; }
         geometry = { type: "pencil", points: simplify(currentPoints, 2.5) };
         currentPoints = [];
       } else {
@@ -350,34 +452,16 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
 
       if (!geometry) return;
 
-      // Identity assigned exactly once, here at commit.
       const shape: Shape = { ...geometry, id: crypto.randomUUID() };
-
-      // Optimistic local apply — the server excludes the sender from broadcast,
-      // so we never get our own op echoed back.
-      shapesRef.current = applyOp(shapesRef.current, {
-        opType: "CREATE",
-        shapeId: shape.id,
-        payload: shape,
-      });
-
-      socket.send(JSON.stringify({
-        type: "op",
-        roomId,
-        opType: "CREATE",
-        shapeId: shape.id,
-        payload: shape,
-      }));
-
-      redraw(ctx, canvas, shapesRef.current, cameraRef.current, selectedIdRef.current);
+      undoStackRef.current.push({ opType: "DELETE", shapeId: shape.id, payload: null });
+      emitOp({ opType: "CREATE", shapeId: shape.id, payload: shape });
+      redrawRef.current();
     };
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const cam = cameraRef.current;
-
       if (e.ctrlKey || e.metaKey) {
-        // Zoom toward the cursor (ctrl+wheel, or trackpad pinch).
         const { x: sx, y: sy } = getCanvasPos(e, canvas);
         const world = screenToWorld(sx, sy, cam);
         const factor = Math.exp(-e.deltaY * 0.0045);
@@ -387,11 +471,10 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
         cam.scale = newScale;
         setZoomPct(Math.round(newScale * 100));
       } else {
-        // Plain scroll / two-finger trackpad = pan.
         cam.x -= e.deltaX;
         cam.y -= e.deltaY;
       }
-      redraw(ctx, canvas, shapesRef.current, cam, selectedIdRef.current);
+      redrawRef.current();
     };
 
     canvas.addEventListener("mousedown", onDown);
@@ -418,25 +501,92 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
       <canvas
         ref={canvasRef}
         className="fixed left-0 top-0 block cursor-crosshair"
-        style={{ background: "#fff" }}
+        style={{ background: getThemeBg(theme) }}
       />
 
-      <div className="fixed left-1/2 top-4 -translate-x-1/2 flex gap-1 rounded-xl bg-[#0e1110] p-1 shadow-lg ring-1 ring-white/10">
-        {TOOLS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => selectTool(t.id)}
-            title={`${t.id} (${t.key})`}
-            className={`h-9 w-9 rounded-lg text-lg leading-none transition ${
-              tool === t.id
-                ? "bg-[#a6ff5e] text-black"
-                : "text-neutral-300 hover:bg-white/10"
-            }`}
-          >
-            {t.glyph}
-          </button>
-        ))}
-      </div>
+      <button
+        onClick={() => setMenuOpen((v) => !v)}
+        title="Menu"
+        className="fixed left-4 top-4 h-9 w-9 rounded-lg bg-[#0e1110] text-neutral-200 shadow-lg ring-1 ring-white/10 hover:bg-white/10"
+      >
+        ☰
+      </button>
+
+      {menuOpen && (
+        <div className="fixed left-4 top-16 w-64 rounded-xl bg-[#0e1110] p-3 text-neutral-200 shadow-xl ring-1 ring-white/10">
+          {/* Time travel */}
+          <div className="flex items-center justify-between">
+            <span className="text-sm">Time travel</span>
+            <button
+              onClick={() => (travelActive ? exitTravel() : enterTravel())}
+              className={`h-6 rounded px-2 text-xs transition ${
+                travelActive ? "bg-[#a6ff5e] text-black" : "bg-white/10 hover:bg-white/20"
+              }`}
+            >
+              {travelActive ? "On" : "Off"}
+            </button>
+          </div>
+
+          {travelActive && (
+            <div className="mt-3">
+              <input
+                type="range"
+                min={0}
+                max={maxSeq}
+                value={travelSeq}
+                onChange={(e) => onScrub(Number(e.target.value))}
+                className="w-full accent-[#a6ff5e]"
+              />
+              <div className="mt-1 flex justify-between text-[11px] text-neutral-400">
+                <span>empty</span>
+                <span>seq {travelSeq} / {maxSeq}</span>
+                <span>now</span>
+              </div>
+            </div>
+          )}
+
+          {/* Placeholders — wired in the dashboard/theme step */}
+          <div className="mt-3 space-y-1 border-t border-white/10 pt-3 text-sm text-neutral-500">
+            <div className="cursor-not-allowed">Dashboard (soon)</div>
+            <button
+              onClick={toggleTheme}
+              className="flex w-full items-center justify-between text-left text-neutral-200 hover:text-white"
+            >
+              <span>Theme</span>
+              <span className="rounded bg-white/10 px-2 py-0.5 text-xs">
+                {theme === "dark" ? "Dark" : "Light"}
+              </span>
+            </button>
+            <div className="cursor-not-allowed">Account (soon)</div>
+            <div className="cursor-not-allowed">Log out (soon)</div>
+          </div>
+        </div>
+      )}
+
+      {!travelActive && (
+        <div className="fixed left-1/2 top-4 -translate-x-1/2 flex gap-1 rounded-xl bg-[#0e1110] p-1 shadow-lg ring-1 ring-white/10">
+          {TOOLS.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => selectTool(t.id)}
+              title={`${t.id} (${t.key})`}
+              className={`h-9 w-9 rounded-lg text-lg leading-none transition ${
+                tool === t.id
+                  ? "bg-[#a6ff5e] text-black"
+                  : "text-neutral-300 hover:bg-white/10"
+              }`}
+            >
+              {t.glyph}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {travelActive && (
+        <div className="fixed left-1/2 top-4 -translate-x-1/2 rounded-xl bg-[#a6ff5e] px-3 py-2 text-sm font-medium text-black shadow-lg">
+          Viewing history — read only
+        </div>
+      )}
 
       <div className="fixed bottom-4 left-4 flex items-center gap-1 rounded-lg bg-[#0e1110] p-1 text-neutral-300 ring-1 ring-white/10">
         <button onClick={() => applyZoom(1 / 1.2)} className="h-7 w-7 rounded hover:bg-white/10">−</button>

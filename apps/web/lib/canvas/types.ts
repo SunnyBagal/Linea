@@ -42,5 +42,6 @@ export type OpType = "CREATE" | "UPDATE" | "DELETE"
 export type CanvasOp = {
   opType: OpType;
   shapeId: string;
-  payload: Shape | null
+  payload: Shape | null;
+  seq?: number
 }

@@ -118,11 +118,12 @@ app.post("/room", authMiddleware, async (req, res) => {
       data: { 
         slug, adminId 
       },
-      select: { id: true },
+      select: { id: true, slug:true },
     });
 
     return res.status(201).json({ 
-      roomId: room.id 
+      roomId: room.id ,
+      slug: room.slug,
     });
 
   } catch (error) {
@@ -138,6 +139,26 @@ app.post("/room", authMiddleware, async (req, res) => {
       message: "Could not create room." 
     });
 
+  }
+});
+
+
+app.get("/rooms", authMiddleware, async (req, res) => {
+  const adminId = req.userId;
+  if (!adminId) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  try {
+    const rooms = await prisma.room.findMany({
+      where: { adminId },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, slug: true, createdAt: true },
+    });
+    return res.json({ rooms });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "Could not fetch rooms." });
   }
 });
 

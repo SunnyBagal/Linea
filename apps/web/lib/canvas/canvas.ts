@@ -5,6 +5,25 @@ export const MIN_SCALE = 0.1;
 export const MAX_SCALE = 8;
 const GRID_SIZE = 40;
 
+export type Theme = "light" | "dark";
+
+type Palette = { stroke: string; grid: string; bg: string };
+
+const PALETTES: Record<Theme, Palette> = {
+  light: { stroke: "#111111", grid: "rgba(0,0,0,0.06)",  bg: "#ffffff" },
+  dark:  { stroke: "#e6e6e6", grid: "rgba(255,255,255,0.07)", bg: "#0b0d0c" },
+};
+
+let activePalette: Palette = PALETTES.dark; 
+
+export function setTheme(theme: Theme) {
+  activePalette = PALETTES[theme];
+}
+
+export function getThemeBg(theme: Theme): string {
+  return PALETTES[theme].bg;
+}
+
 export function screenToWorld(sx: number, sy: number, cam: Camera) {
   return { x: (sx - cam.x) / cam.scale, y: (sy - cam.y) / cam.scale };
 }
@@ -15,7 +34,7 @@ export function getCanvasPos(e: MouseEvent, canvas: HTMLCanvasElement) {
 }
 
 export function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeGeometry) {
-  ctx.strokeStyle = "#111";
+  ctx.strokeStyle = activePalette.stroke;
   ctx.lineWidth = 2;
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
@@ -111,7 +130,7 @@ function drawGrid(
   const startX = Math.floor(left / step) * step;
   const startY = Math.floor(top / step) * step;
 
-  ctx.strokeStyle = "rgba(0,0,0,0.06)";
+  ctx.strokeStyle = activePalette.grid;
   ctx.lineWidth = 1 / cam.scale; 
   ctx.beginPath();
   for (let x = startX; x <= right; x += step) {
@@ -342,6 +361,12 @@ export function applyOp(shapes: Shape[], op: CanvasOp): Shape[] {
 
 }
 
+export function stateAtSeq(ops: CanvasOp[], maxSeq: number): Shape[] {
+  return ops
+    .filter((o) => (o.seq ?? 0) <= maxSeq)
+    .reduce<Shape[]>((shapes, op) => applyOp(shapes, op), []);
+}
+
 
 export async function fetchOperations(roomId: number): Promise<CanvasOp[]> {
   const token = localStorage.getItem("token") ?? "";
@@ -360,6 +385,7 @@ export async function fetchOperations(roomId: number): Promise<CanvasOp[]> {
   const data = await res.json();
 
   return (data.operations ?? []).map((row : { 
+    seq: number;
     type: OpType;
     shapeId: string;
     payload: Shape | null 
@@ -367,5 +393,6 @@ export async function fetchOperations(roomId: number): Promise<CanvasOp[]> {
     opType: row.type,
     shapeId: row.shapeId,
     payload: row.payload ?? null,
+    seq: row.seq,
   }));
 }

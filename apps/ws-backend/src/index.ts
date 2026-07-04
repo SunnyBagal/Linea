@@ -158,6 +158,14 @@ wss.on('connection', (ws, request) => {
           payload: msg.payload,
           userId: conn.userId,
         }, ws);
+
+        ws.send(JSON.stringify({
+          type: 'op_ack',
+          roomId: msg.roomId,
+          shapeId: msg.shapeId,
+          seq: op.seq
+        }));
+
       } catch (err) {
         console.error('op persist failed', err);
         ws.send(JSON.stringify({ 
