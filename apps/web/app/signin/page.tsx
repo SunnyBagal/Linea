@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import axios from "axios";
 import { BACKEND_URL } from "../../config";
-import { AuthShell, AuthHeading, TextField, PasswordField, PrimaryButton, SocialButtons, type SubmitState } from "@repo/ui";
+import { AuthShell, AuthHeading, TextField, PasswordField, PrimaryButton, type SubmitState } from "@repo/ui";
 
 export default function SignInPage() {
   const router = useRouter();
@@ -32,13 +32,11 @@ export default function SignInPage() {
   return (
     <AuthShell>
       <AuthHeading title="Welcome back" sub="Sign in to keep sketching with your team." />
-      <SocialButtons />
       <form noValidate onSubmit={onSubmit}>
         <TextField id="email" name="email" type="email" label="Email" autoComplete="email" placeholder="you@studio.com" />
         <PasswordField id="password" name="password" label="Password" autoComplete="current-password" placeholder="••••••••" showCapsHint />
         <div className="mb-5 mt-0.5 flex items-center justify-between">
           <label className="ln-check"><input type="checkbox" name="remember" /> Remember me</label>
-          <Link href="/reset" className="ln-link">Forgot password?</Link>
         </div>
         {error && <p className="ln-fine" style={{ color: "tomato" }}>{error}</p>}
         <PrimaryButton state={state}>Sign in</PrimaryButton>

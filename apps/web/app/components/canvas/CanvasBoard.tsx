@@ -57,6 +57,12 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
   const selectTool = (t: Tool) => {
     setTool(t);
     toolRef.current = t;
+
+    if ( t !== "select"){
+      selectedIdRef.current = null;
+      redrawRef.current();
+    }
+
   };
 
   // Zoom the camera toward the viewport center (used by the +/- buttons).
@@ -90,26 +96,31 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
     const bounds = getShapesBounds(shapes);
     if (!bounds) { resetZoom(); return; }
 
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = canvas.width / dpr;   // back to CSS pixels
+    const cssH = canvas.height / dpr;
+
     const pad = 80;
     const contentW = Math.max(1, bounds.maxX - bounds.minX);
     const contentH = Math.max(1, bounds.maxY - bounds.minY);
     const scale = Math.min(
       MAX_SCALE,
       Math.max(MIN_SCALE, Math.min(
-        (canvas.width - pad * 2) / contentW,
-        (canvas.height - pad * 2) / contentH
+        (cssW - pad * 2) / contentW,
+        (cssH - pad * 2) / contentH
       ))
     );
     const cx = (bounds.minX + bounds.maxX) / 2;
     const cy = (bounds.minY + bounds.maxY) / 2;
     cameraRef.current = {
       scale,
-      x: canvas.width / 2 - cx * scale,
-      y: canvas.height / 2 - cy * scale,
+      x: cssW / 2 - cx * scale,   // center in CSS-pixel space
+      y: cssH / 2 - cy * scale,
     };
     setZoomPct(Math.round(scale * 100));
     redrawRef.current();
   };
+
   zoomToFitRef.current = zoomToFit;
 
   // Highest seq present in the log (current head).
@@ -193,8 +204,11 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
     };
 
     const resize = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = window.innerWidth * dpr;   
+      canvas.height = window.innerHeight * dpr;
+      canvas.style.width = window.innerWidth + "px";
+      canvas.style.height = window.innerHeight + "px";
       redrawRef.current();
     };
     resize();
@@ -478,7 +492,7 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
       if (e.ctrlKey || e.metaKey) {
         const { x: sx, y: sy } = getCanvasPos(e, canvas);
         const world = screenToWorld(sx, sy, cam);
-        const factor = Math.exp(-e.deltaY * 0.0045);
+        const factor = Math.exp(-e.deltaY * 0.0025);
         const newScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, cam.scale * factor));
         cam.x = sx - world.x * newScale;
         cam.y = sy - world.y * newScale;

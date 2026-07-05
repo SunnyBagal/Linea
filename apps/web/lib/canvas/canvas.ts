@@ -1,5 +1,8 @@
 import { Shape, ShapeGeometry, Tool, Camera, CanvasOp, OpType } from "./types";
 import { BACKEND_URL } from "../../config";
+import rough from "roughjs";
+import type { RoughCanvas } from "roughjs/bin/canvas";
+import type { Drawable } from "roughjs/bin/core";
 
 export const MIN_SCALE = 0.1;
 export const MAX_SCALE = 8;
@@ -14,7 +17,7 @@ const PALETTES: Record<Theme, Palette> = {
   dark:  { stroke: "#e6e6e6", grid: "rgba(255,255,255,0.07)", bg: "#0b0d0c" },
 };
 
-let activePalette: Palette = PALETTES.dark; 
+let activePalette: Palette = PALETTES.dark;
 
 export function setTheme(theme: Theme) {
   activePalette = PALETTES[theme];
@@ -22,6 +25,10 @@ export function setTheme(theme: Theme) {
 
 export function getThemeBg(theme: Theme): string {
   return PALETTES[theme].bg;
+}
+
+export function getDpr(): number {
+  return typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
 }
 
 export function screenToWorld(sx: number, sy: number, cam: Camera) {
@@ -33,6 +40,87 @@ export function getCanvasPos(e: MouseEvent, canvas: HTMLCanvasElement) {
   return { x: e.clientX - rect.left, y: e.clientY - rect.top };
 }
 
+// -------------------- Rough.js (hand-drawn) rendering --------------------
+
+// Stable numeric seed from a shape id, so a shape's sketch never re-rolls.
+function seedFromId(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+// Content key: same geometry + same theme stroke -> reuse the cached drawable.
+function shapeKey(shape: Shape, stroke: string): string {
+  return stroke + "|" + JSON.stringify(shape);
+}
+
+// Cache of Rough drawables, keyed by content. Bounded so it can't grow forever.
+const roughCache = new Map<string, Drawable>();
+const ROUGH_CACHE_MAX = 2000;
+
+function getRough(canvas: HTMLCanvasElement): RoughCanvas {
+  // Cache the RoughCanvas on the element so we don't recreate it each frame.
+  const anyCanvas = canvas as HTMLCanvasElement & { __rc?: RoughCanvas };
+  if (!anyCanvas.__rc) anyCanvas.__rc = rough.canvas(canvas);
+  return anyCanvas.__rc;
+}
+
+function getDrawable(rc: RoughCanvas, shape: Shape, stroke: string): Drawable {
+  const key = shapeKey(shape, stroke);
+  const hit = roughCache.get(key);
+  if (hit) return hit;
+
+  const gen = rc.generator;
+  const seed = seedFromId(shape.id);
+  const opts = { stroke, strokeWidth: 1.6, roughness: 1.1, bowing: 1, seed };
+
+  let d: Drawable;
+  if (shape.type === "rect") {
+    d = gen.rectangle(shape.x, shape.y, shape.width, shape.height, opts);
+  } else if (shape.type === "circle") {
+    d = gen.circle(shape.centerX, shape.centerY, shape.radius * 2, opts);
+  } else if (shape.type === "line") {
+    d = gen.line(shape.x1, shape.y1, shape.x2, shape.y2, opts);
+  } else if (shape.type === "arrow") {
+    // Rough has no arrow primitive; shaft + two head strokes as one path.
+    const angle = Math.atan2(shape.y2 - shape.y1, shape.x2 - shape.x1);
+    const head = 14;
+    const hx1 = shape.x2 - head * Math.cos(angle - Math.PI / 6);
+    const hy1 = shape.y2 - head * Math.sin(angle - Math.PI / 6);
+    const hx2 = shape.x2 - head * Math.cos(angle + Math.PI / 6);
+    const hy2 = shape.y2 - head * Math.sin(angle + Math.PI / 6);
+    d = gen.linearPath(
+      [
+        [shape.x1, shape.y1],
+        [shape.x2, shape.y2],
+        [hx1, hy1],
+        [shape.x2, shape.y2],
+        [hx2, hy2],
+      ],
+      opts
+    );
+  } else {
+    // pencil: a rough linearPath through the points
+    d = gen.linearPath(shape.points.map((p) => [p.x, p.y] as [number, number]), opts);
+  }
+
+  if (roughCache.size >= ROUGH_CACHE_MAX) {
+    // simple eviction: drop the oldest half
+    const keys = Array.from(roughCache.keys()).slice(0, ROUGH_CACHE_MAX / 2);
+    for (const k of keys) roughCache.delete(k);
+  }
+  roughCache.set(key, d);
+  return d;
+}
+
+// Committed shapes render with Rough for the hand-drawn look.
+export function drawShapeRough(rc: RoughCanvas, shape: Shape, stroke: string) {
+  rc.draw(getDrawable(rc, shape, stroke));
+}
+
+// -------------------- Plain-canvas rendering (previews) --------------------
+
+// Used ONLY for the in-progress preview while drawing (fast, no rough wobble).
 export function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeGeometry) {
   ctx.strokeStyle = activePalette.stroke;
   ctx.lineWidth = 2;
@@ -41,22 +129,21 @@ export function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeGeometry) {
 
   if (shape.type === "rect") {
     ctx.strokeRect(shape.x, shape.y, shape.width, shape.height);
+  }
 
-  } 
-  
   else if (shape.type === "circle") {
     ctx.beginPath();
     ctx.arc(shape.centerX, shape.centerY, shape.radius, 0, Math.PI * 2);
     ctx.stroke();
-  } 
-  
+  }
+
   else if (shape.type === "line") {
     ctx.beginPath();
     ctx.moveTo(shape.x1, shape.y1);
     ctx.lineTo(shape.x2, shape.y2);
     ctx.stroke();
-  } 
-  
+  }
+
   else if (shape.type === "arrow") {
     ctx.beginPath();
     ctx.moveTo(shape.x1, shape.y1);
@@ -65,7 +152,7 @@ export function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeGeometry) {
 
     const angle = Math.atan2(shape.y2 - shape.y1, shape.x2 - shape.x1);
     const head = 12;
-    
+
     ctx.beginPath();
     ctx.moveTo(shape.x2, shape.y2);
 
@@ -81,15 +168,13 @@ export function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeGeometry) {
     );
 
     ctx.stroke();
+  }
 
-  } 
-  
   else if (shape.type === "pencil") {
     ctx.beginPath();
     shape.points.forEach((p, i) =>
       i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)
     );
-
     ctx.stroke();
   }
 }
@@ -101,12 +186,19 @@ export function redraw(
   cam: Camera,
   selectedId?: string | null
 ) {
+  const dpr = getDpr();
+  const rc = getRough(canvas);
+
+  // Clear in device space, then set the world transform WITH dpr baked in,
+  // so all downstream drawing stays in CSS-pixel world coords.
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.setTransform(cam.scale, 0, 0, cam.scale, cam.x, cam.y);
+  ctx.setTransform(cam.scale * dpr, 0, 0, cam.scale * dpr, cam.x * dpr, cam.y * dpr);
 
   drawGrid(ctx, canvas, cam);
-  for (const shape of shapes) drawShape(ctx, shape);
+
+  const stroke = activePalette.stroke;
+  for (const shape of shapes) drawShapeRough(rc, shape, stroke);
 
   if (selectedId) {
     const sel = shapes.find((s) => s.id === selectedId);
@@ -119,10 +211,15 @@ function drawGrid(
   canvas: HTMLCanvasElement,
   cam: Camera
 ) {
+  const dpr = getDpr();
+  // canvas.width/height are DEVICE pixels; reason in CSS pixels for the range.
+  const cssW = canvas.width / dpr;
+  const cssH = canvas.height / dpr;
+
   const left = -cam.x / cam.scale;
   const top = -cam.y / cam.scale;
-  const right = (canvas.width - cam.x) / cam.scale;
-  const bottom = (canvas.height - cam.y) / cam.scale;
+  const right = (cssW - cam.x) / cam.scale;
+  const bottom = (cssH - cam.y) / cam.scale;
 
   let step = GRID_SIZE;
   while ((right - left) / step > 80) step *= 2;
@@ -131,7 +228,7 @@ function drawGrid(
   const startY = Math.floor(top / step) * step;
 
   ctx.strokeStyle = activePalette.grid;
-  ctx.lineWidth = 1 / cam.scale; 
+  ctx.lineWidth = 1 / cam.scale;
   ctx.beginPath();
   for (let x = startX; x <= right; x += step) {
     ctx.moveTo(x, top);
@@ -193,7 +290,7 @@ export function simplify(points: Pt[], epsilon = 1): Pt[] {
 
   let maxDist = 0, index = 0;
   for (let i = 1; i < points.length - 1; i++) {
-    const d = perpDist(points[i]!, start, end); 
+    const d = perpDist(points[i]!, start, end);
     if (d > maxDist) { maxDist = d; index = i; }
   }
 
@@ -217,7 +314,7 @@ export function getShapesBounds(shapes: Shape[]) {
   for (const s of shapes) {
     if (s.type === "rect") {
       expand(s.x, s.y);
-      expand(s.x + s.width, s.y + s.height); 
+      expand(s.x + s.width, s.y + s.height);
     } else if (s.type === "circle") {
       expand(s.centerX - s.radius, s.centerY - s.radius);
       expand(s.centerX + s.radius, s.centerY + s.radius);
@@ -232,17 +329,17 @@ export function getShapesBounds(shapes: Shape[]) {
 }
 
 function distToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
-  const dx = bx - ax
-  const dy = by - ay
+  const dx = bx - ax;
+  const dy = by - ay;
   if (dx === 0 && dy === 0) {
     return Math.hypot(px - ax, py - ay);
   }
 
-  let t = ((px- ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy);
+  let t = ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy);
   t = Math.max(0, Math.min(1, t));
-  const cx = ax + t * dx
-  const cy = ay + t * dy
-  return Math.hypot(px - cx, py-cy )
+  const cx = ax + t * dx;
+  const cy = ay + t * dy;
+  return Math.hypot(px - cx, py - cy);
 }
 
 function hitShape(shape: Shape, wx: number, wy: number, tol: number): boolean {
@@ -255,7 +352,7 @@ function hitShape(shape: Shape, wx: number, wy: number, tol: number): boolean {
   }
   if (shape.type === "circle") {
     const d = Math.hypot(wx - shape.centerX, wy - shape.centerY);
-    return d <= shape.radius + tol; 
+    return d <= shape.radius + tol;
   }
   if (shape.type === "line" || shape.type === "arrow") {
     return distToSegment(wx, wy, shape.x1, shape.y1, shape.x2, shape.y2) <= tol;
@@ -384,11 +481,11 @@ export async function fetchOperations(roomId: number): Promise<CanvasOp[]> {
 
   const data = await res.json();
 
-  return (data.operations ?? []).map((row : { 
+  return (data.operations ?? []).map((row : {
     seq: number;
     type: OpType;
     shapeId: string;
-    payload: Shape | null 
+    payload: Shape | null
   }) => ({
     opType: row.type,
     shapeId: row.shapeId,

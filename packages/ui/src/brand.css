@@ -224,3 +224,50 @@
   .ln-scribble,.ln-hl{stroke-dashoffset:0;opacity:1}
   .ln-pop{opacity:1;transform:none}
 }
+/* ============================================================
+   Landing v2 additions — APPEND to packages/ui/src/brand.css
+   ============================================================ */
+
+/* white-gap / overscroll fix + smooth anchor scrolling */
+html{background:#060808;overscroll-behavior-y:none;scroll-behavior:smooth}
+
+/* scroll reveal */
+.ln-reveal{opacity:0;transform:translateY(26px);
+  transition:opacity .7s var(--ln-ease),transform .9s var(--ln-ease)}
+.ln-reveal.ln-in{opacity:1;transform:none}
+
+/* static sticky note (testimonials) */
+.ln-note{position:relative;width:230px;padding:18px 18px 22px;border-radius:6px;
+  background:linear-gradient(180deg,#b3ff74,#9bf24c);color:#10210a;
+  font-family:"Caveat",cursive;font-size:22px;font-weight:600;line-height:1.15;
+  box-shadow:0 14px 30px rgba(0,0,0,.45), inset 0 2px 0 rgba(255,255,255,.25);
+  transition:transform .3s var(--ln-ease)}
+.ln-note:hover{transform:rotate(0deg) translateY(-4px) !important}
+.ln-note::after{content:"";position:absolute;right:0;bottom:0;width:0;height:0;
+  border-style:solid;border-width:0 0 14px 14px;
+  border-color:transparent transparent rgba(0,0,0,.18) transparent;border-radius:0 0 6px 0}
+.ln-note small{display:block;margin-top:10px;font-size:15px;opacity:.7}
+
+/* FAQ accordions */
+.ln-faq details{border:1px solid var(--ln-line-soft);border-radius:16px;
+  background:rgba(255,255,255,.02);
+  transition:border-color .25s ease,background .25s ease}
+.ln-faq details[open]{border-color:rgba(166,255,94,.28);background:rgba(166,255,94,.03)}
+.ln-faq summary{cursor:pointer;list-style:none;display:flex;align-items:center;
+  justify-content:space-between;gap:16px;padding:18px 20px;font-weight:600;font-size:15px}
+.ln-faq summary::-webkit-details-marker{display:none}
+.ln-faq summary::after{content:"+";font-size:20px;line-height:1;color:var(--ln-text-3);
+  transition:transform .3s var(--ln-ease),color .2s ease}
+.ln-faq details[open] summary::after{transform:rotate(45deg);color:var(--ln-green)}
+.ln-faq .ln-faq-body{padding:0 20px 18px;color:var(--ln-text-2);font-size:14px;line-height:1.65}
+
+/* time-travel playhead */
+.ln-playhead{animation:ln-scrub 6s ease-in-out infinite alternate}
+@keyframes ln-scrub{from{transform:translateX(0)}to{transform:translateX(256px)}}
+
+@media (prefers-reduced-motion: reduce){
+  html{scroll-behavior:auto}
+  .ln-reveal{opacity:1;transform:none;transition:none}
+  .ln-playhead{animation:none}
+  .ln-note{transition:none}
+}
