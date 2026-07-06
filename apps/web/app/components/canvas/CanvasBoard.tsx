@@ -11,12 +11,13 @@ import {
 import { useRouter } from "next/navigation";
 
 const TOOLS: { id: Tool; glyph: string; key: string }[] = [
-  { id: "select", glyph: "⌖", key: "v" },
+  { id: "select", glyph: "↖", key: "v" },
   { id: "rect", glyph: "▭", key: "r" },
   { id: "circle", glyph: "◯", key: "c" },
   { id: "line", glyph: "╱", key: "l" },
   { id: "arrow", glyph: "↗", key: "a" },
   { id: "pencil", glyph: "✎", key: "p" },
+  { id: "text", glyph: "T", key: "t"},
 ];
 
 const MIN_POINT_DIST_SQ = 4;
@@ -54,6 +55,12 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
   const travelActiveRef = useRef(false);
   const travelSeqRef = useRef(0);
 
+  // Active text editor: screen position + current value, or null when inactive.
+  const [textEditor, setTextEditor] = useState<{ sx: number; sy: number; wx: number; wy: number } | null>(null);
+  const [textValue, setTextValue] = useState("");
+  const textEditorRef = useRef<typeof textEditor>(null);
+  textEditorRef.current = textEditor;
+
   const selectTool = (t: Tool) => {
     setTool(t);
     toolRef.current = t;
@@ -63,6 +70,26 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
       redrawRef.current();
     }
 
+  };
+
+  const emitTextRef = useRef<(shape: Shape) => void>(() => {});
+
+  const commitText = () => {
+    const ed = textEditorRef.current;
+    const value = textValue.trim();
+    setTextEditor(null);
+    setTextValue("");
+    if (!ed || value.length === 0) return; // discard empty
+
+    const shape: Shape = {
+      id: crypto.randomUUID(),
+      type: "text",
+      x: ed.wx,
+      y: ed.wy,
+      text: value,
+      fontSize: 24,
+    };
+    emitTextRef.current(shape);
   };
 
   // Zoom the camera toward the viewport center (used by the +/- buttons).
@@ -290,6 +317,12 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
       }));
     };
 
+    emitTextRef.current = (shape: Shape) => {
+      undoStackRef.current.push({ opType: "DELETE", shapeId: shape.id, payload: null });
+      emitOp({ opType: "CREATE", shapeId: shape.id, payload: shape });
+      redrawRef.current();
+    };
+
     const doUndo = () => {
       const inverse = undoStackRef.current.pop();
       if (!inverse) return;
@@ -321,7 +354,7 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
         return;
       }
 
-      if (travelActiveRef.current) return; // editing disabled in the past
+      if (travelActiveRef.current) return; 
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
@@ -343,7 +376,7 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.code === "Space") {
         spaceHeld = false;
-        if (!panning) canvas.style.cursor = "crosshair";
+        if (!panning) canvas.style.cursor = toolRef.current === "select" ? "default" : "crosshair";
       }
     };
 
@@ -374,6 +407,19 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
           dragOrigShape = hit;
         }
         redrawRef.current();
+        return;
+      }
+
+      // TEXT tool: open an input overlay at the click point.
+      if (toolRef.current === "text") {
+        const rect = canvas.getBoundingClientRect();
+        setTextValue("");
+        setTextEditor({
+          sx: sx + rect.left,   // screen position for the DOM input
+          sy: sy + rect.top,
+          wx: w.x,              // world position for the committed shape
+          wy: w.y,
+        });
         return;
       }
 
@@ -457,7 +503,7 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
 
       if (panning) {
         panning = false;
-        canvas.style.cursor = spaceHeld ? "grab" : "crosshair";
+        canvas.style.cursor = spaceHeld ? "grab" : toolRef.current === "select" ? "default" : "crosshair";
         return;
       }
       if (!drawing) return;
@@ -528,9 +574,37 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
     <>
       <canvas
         ref={canvasRef}
-        className="fixed left-0 top-0 block cursor-crosshair"
+        className={`fixed left-0 top-0 block ${
+          tool === "select" ? "cursor-default" : "cursor-crosshair"
+        }`}
         style={{ background: getThemeBg(theme) }}
       />
+
+      {textEditor && (
+        <input
+          autoFocus
+          value={textValue}
+          onChange={(e) => setTextValue(e.target.value)}
+          onBlur={commitText}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { e.preventDefault(); commitText(); }
+            if (e.key === "Escape") { setTextEditor(null); setTextValue(""); }
+          }}
+          style={{
+            position: "fixed",
+            left: textEditor.sx,
+            top: textEditor.sy,
+            font: `${24 * cameraRef.current.scale}px 'Comic Sans MS', cursive`,
+            color: theme === "dark" ? "#e6e6e6" : "#111",
+            background: "transparent",
+            border: "1px dashed #a6ff5e",
+            outline: "none",
+            padding: "2px 4px",
+            minWidth: 40,
+            zIndex: 50,
+          }}
+        />
+      )}
 
       <button
         onClick={() => setMenuOpen((v) => !v)}

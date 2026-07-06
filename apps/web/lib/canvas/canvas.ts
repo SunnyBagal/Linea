@@ -7,6 +7,7 @@ import type { Drawable } from "roughjs/bin/core";
 export const MIN_SCALE = 0.1;
 export const MAX_SCALE = 8;
 const GRID_SIZE = 40;
+const FONT_FAMILY = "'Comic Sanvs MS', 'Segoe Print', cursive";
 
 export type Theme = "light" | "dark";
 
@@ -115,6 +116,16 @@ function getDrawable(rc: RoughCanvas, shape: Shape, stroke: string): Drawable {
 
 // Committed shapes render with Rough for the hand-drawn look.
 export function drawShapeRough(rc: RoughCanvas, shape: Shape, stroke: string) {
+  if (shape.type === "text") {
+    const ctx = rc.canvas.getContext("2d")!;
+    ctx.save();
+    ctx.fillStyle = stroke;
+    ctx.font = `${shape.fontSize}px ${FONT_FAMILY}`;
+    ctx.textBaseline = "top";
+    ctx.fillText(shape.text, shape.x, shape.y);
+    ctx.restore();
+    return;
+  }
   rc.draw(getDrawable(rc, shape, stroke));
 }
 
@@ -312,6 +323,7 @@ export function getShapesBounds(shapes: Shape[]) {
     if (y > maxY) maxY = y;
   };
   for (const s of shapes) {
+    
     if (s.type === "rect") {
       expand(s.x, s.y);
       expand(s.x + s.width, s.y + s.height);
@@ -323,6 +335,10 @@ export function getShapesBounds(shapes: Shape[]) {
       expand(s.x2, s.y2);
     } else if (s.type === "pencil") {
       for (const p of s.points) expand(p.x, p.y);
+    } else if (s.type === "text") {
+      const w = s.text.length * s.fontSize * 0.6;
+      expand(s.x, s.y);
+      expand(s.x + w, s.y + s.fontSize);
     }
   }
   return { minX, minY, maxX, maxY };
@@ -349,6 +365,13 @@ function hitShape(shape: Shape, wx: number, wy: number, tol: number): boolean {
     const y1 = Math.min(shape.y, shape.y + shape.height);
     const y2 = Math.max(shape.y, shape.y + shape.height);
     return wx >= x1 - tol && wx <= x2 + tol && wy >= y1 - tol && wy <= y2 + tol;
+  }
+  if (shape.type === "text") {
+    // Approximate box: width ~ text length * 0.6 * fontSize, height ~ fontSize.
+    const w = shape.text.length * shape.fontSize * 0.6;
+    const h = shape.fontSize;
+    return wx >= shape.x - tol && wx <= shape.x + w + tol &&
+           wy >= shape.y - tol && wy <= shape.y + h + tol;
   }
   if (shape.type === "circle") {
     const d = Math.hypot(wx - shape.centerX, wy - shape.centerY);
@@ -377,6 +400,9 @@ export function hitTest(shapes: Shape[], wx: number, wy: number, tol: number): S
 }
 
 export function translateShape(shape: Shape, dx: number, dy: number): Shape {
+  if (shape.type === "text") {
+    return { ...shape, x: shape.x + dx, y: shape.y + dy };
+  }
   if (shape.type === "rect") {
     return { ...shape, x: shape.x + dx, y: shape.y + dy };
   }
@@ -399,6 +425,7 @@ function shapeBounds(shape: Shape) {
       maxY: Math.max(shape.y, shape.y + shape.height),
     };
   }
+  
   if (shape.type === "circle") {
     return {
       minX: shape.centerX - shape.radius, minY: shape.centerY - shape.radius,

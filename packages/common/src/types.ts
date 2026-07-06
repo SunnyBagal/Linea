@@ -22,6 +22,13 @@ const PointSchema = z.object({
 
 export const ShapeGeometrySchema = z.discriminatedUnion('type', [
   z.object({
+    type: z.literal('text'),
+    x: z.number(),
+    y: z.number(),
+    text: z.string(),
+    fontSize: z.number(),
+  }),
+  z.object({
     type: z.literal('rect'),
     x: z.number(), y: z.number(),
     width: z.number(), height: z.number(),
@@ -45,6 +52,14 @@ export const ShapeGeometrySchema = z.discriminatedUnion('type', [
 ]);
 
 export const ShapeSchema = z.discriminatedUnion('type', [
+  z.object({
+    id: z.string(),
+    type: z.literal('text'),
+    x: z.number(),
+    y: z.number(),
+    text: z.string(),
+    fontSize: z.number(),
+  }),
   z.object({
     id: z.string(),
     type: z.literal('rect'),

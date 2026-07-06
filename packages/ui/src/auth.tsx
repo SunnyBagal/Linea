@@ -179,7 +179,7 @@ export function Toast({ open, message }: { open: boolean; message: string }) {
   );
 }
 
-export function useDemoSubmit(message = "UI demo — wire this up to BetterAuth.") {
+export function useDemoSubmit() {
   const [state, setState] = useState<SubmitState>("idle");
   const [toastOpen, setToastOpen] = useState(false);
 
@@ -195,5 +195,5 @@ export function useDemoSubmit(message = "UI demo — wire this up to BetterAuth.
     }, 1300);
   };
 
-  return { state, onSubmit, toast: <Toast open={toastOpen} message={message} /> };
+  return { state, onSubmit, };
 }
