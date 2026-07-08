@@ -58,10 +58,15 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
   // Active text editor: screen position + current value, or null when inactive.
   const [textEditor, setTextEditor] = useState<{ sx: number; sy: number; wx: number; wy: number } | null>(null);
   const [textValue, setTextValue] = useState("");
+  const textValueRef = useRef("");
+  textValueRef.current = textValue;
   const textEditorRef = useRef<typeof textEditor>(null);
   textEditorRef.current = textEditor;
 
   const selectTool = (t: Tool) => {
+    if (textEditorRef.current){
+      commitText();
+    }
     setTool(t);
     toolRef.current = t;
 
@@ -76,10 +81,11 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
 
   const commitText = () => {
     const ed = textEditorRef.current;
-    const value = textValue.trim();
+    const value = textValueRef.current.trim();   // ref, not stale state
     setTextEditor(null);
     setTextValue("");
     if (!ed || value.length === 0) return; // discard empty
+    setTextValue("");
 
     const shape: Shape = {
       id: crypto.randomUUID(),
@@ -89,6 +95,7 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
       text: value,
       fontSize: 24,
     };
+    console.log("commitText emitting: ", shape, "emitFn: ", emitTextRef.current.toString().slice(0, 40));
     emitTextRef.current(shape);
   };
 
@@ -197,9 +204,10 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
 
   useEffect(() => {
     const map: Record<string, Tool> = {
-      v: "select", r: "rect", c: "circle", l: "line", a: "arrow", p: "pencil",
+      v: "select", r: "rect", c: "circle", l: "line", a: "arrow", p: "pencil", t: "text",
     };
     const onKey = (e: KeyboardEvent) => {
+      if (textEditorRef.current) return;
       if (e.shiftKey && e.code === "Digit1") {
         e.preventDefault();
         zoomToFitRef.current();
@@ -347,6 +355,8 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
     let dragOrigShape: Shape | null = null;
 
     const onKeyDown = (e: KeyboardEvent) => {
+      if (textEditorRef.current) return;
+
       if (e.code === "Space" && !spaceHeld) {
         spaceHeld = true;
         if (!panning) canvas.style.cursor = "grab";
@@ -412,12 +422,18 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
 
       // TEXT tool: open an input overlay at the click point.
       if (toolRef.current === "text") {
+        e.preventDefault();
+        console.log("TEXT branch hit, opening editor at, ", sx, sy);
+        if (textEditorRef.current){
+          commitText();
+          return
+        }
         const rect = canvas.getBoundingClientRect();
         setTextValue("");
         setTextEditor({
-          sx: sx + rect.left,   // screen position for the DOM input
+          sx: sx + rect.left,   
           sy: sy + rect.top,
-          wx: w.x,              // world position for the committed shape
+          wx: w.x,              
           wy: w.y,
         });
         return;
@@ -585,8 +601,9 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
           autoFocus
           value={textValue}
           onChange={(e) => setTextValue(e.target.value)}
-          onBlur={commitText}
+          onBlur={() => { console.log("INPUT onBlur fired"); commitText(); }}
           onKeyDown={(e) => {
+            console.log("INPUT onKeyDown:", e.key);
             if (e.key === "Enter") { e.preventDefault(); commitText(); }
             if (e.key === "Escape") { setTextEditor(null); setTextValue(""); }
           }}

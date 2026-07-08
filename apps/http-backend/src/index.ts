@@ -7,10 +7,15 @@ import { JWT_SECRET } from "@repo/backend-common/config";
 import { CreateRoomSchema, CreateUserSchema, SigninSchema } from "@repo/common/types";
 import { prisma } from "@repo/db/client";
 import cors from 'cors';
+import { randomBytes } from "crypto";
 
 const app = express();
 app.use(express.json());
 app.use(cors({ origin: "http://localhost:3000"}))
+
+function generateSlug(): string {
+  return randomBytes(6).toString("hex");
+}
 
 app.post("/signup", async (req, res) => {
 
@@ -96,49 +101,43 @@ app.post("/signin", async (req, res) => {
 });
 
 app.post("/room", authMiddleware, async (req, res) => {
-
-  const parsed = CreateRoomSchema.safeParse(req.body);
-
-  if (!parsed.success) {
-    return res.status(400).json({ 
-      message: "Incorrect inputs" 
-    });
-  }
-  const { slug } = parsed.data;
-  const adminId = req.userId;  
-
-  if (!adminId) {
-    return res.status(401).json({
-      message: "Unauthorized"
-    });
-  }
+  const adminId = req.userId;
+  if (!adminId) return res.status(401).json({ message: "Unauthorized" });
 
   try {
-    const room = await prisma.room.create({
-      data: { 
-        slug, adminId 
-      },
-      select: { id: true, slug:true },
-    });
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const slug = generateSlug();
+      try {
+        const room = await prisma.room.create({
+          data: { 
+            slug,
+            adminId 
+          },
+          select: { 
+            id: true, 
+            slug: true 
+          },
+        });
 
-    return res.status(201).json({ 
-      roomId: room.id ,
-      slug: room.slug,
-    });
+        return res.status(201).json({ 
+          roomId: room.id, slug: room.slug 
+        });
 
-  } catch (error) {
-
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      return res.status(409).json({ 
-        message: "Room name already taken." 
-      });
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+          continue; // slug collided, try again
+        }
+        throw error;
+      }
     }
-
+    return res.status(500).json({ 
+      message: "Could not generate a unique room." 
+    });
+  } catch (error) {
     console.error(error);
     return res.status(500).json({ 
       message: "Could not create room." 
     });
-
   }
 });
 

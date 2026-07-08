@@ -7,7 +7,7 @@ import type { Drawable } from "roughjs/bin/core";
 export const MIN_SCALE = 0.1;
 export const MAX_SCALE = 8;
 const GRID_SIZE = 40;
-const FONT_FAMILY = "'Comic Sanvs MS', 'Segoe Print', cursive";
+const FONT_FAMILY = "'Comic Sans MS', 'Segoe Print', cursive";
 
 export type Theme = "light" | "dark";
 
@@ -323,7 +323,7 @@ export function getShapesBounds(shapes: Shape[]) {
     if (y > maxY) maxY = y;
   };
   for (const s of shapes) {
-    
+
     if (s.type === "rect") {
       expand(s.x, s.y);
       expand(s.x + s.width, s.y + s.height);
@@ -425,7 +425,13 @@ function shapeBounds(shape: Shape) {
       maxY: Math.max(shape.y, shape.y + shape.height),
     };
   }
-  
+  if (shape.type === "text") {
+    const w = shape.text.length * shape.fontSize * 0.6;
+    return {
+      minX: shape.x, minY: shape.y,
+      maxX: shape.x + w, maxY: shape.y + shape.fontSize,
+    };
+  }
   if (shape.type === "circle") {
     return {
       minX: shape.centerX - shape.radius, minY: shape.centerY - shape.radius,
