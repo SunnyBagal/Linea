@@ -6,7 +6,6 @@ import { type FormEvent, type InputHTMLAttributes, type ReactNode, useState } fr
 import { LineaLogo } from "./logo";
 import { AuthBoard } from "./board";
 
-/* ---------------- layout shell: card left, live board right ---------------- */
 export function AuthShell({ children }: { children: ReactNode }) {
   return (
     <div className="ln-bg relative flex min-h-dvh flex-col lg:grid lg:grid-cols-[minmax(460px,46%)_1fr]">
@@ -39,7 +38,6 @@ export function AuthHeading({ title, sub }: { title: string; sub: string }) {
   );
 }
 
-/* ---------------- fields ---------------- */
 type FieldProps = InputHTMLAttributes<HTMLInputElement> & { id: string; label: string };
 
 export function TextField({ id, label, ...rest }: FieldProps) {
@@ -123,7 +121,6 @@ export function PasswordField({
   );
 }
 
-/* ---------------- buttons ---------------- */
 export type SubmitState = "idle" | "loading" | "success";
 
 export function PrimaryButton({ state = "idle", children }: { state?: SubmitState; children: ReactNode }) {
@@ -164,12 +161,6 @@ export function SocialButtons() {
   );
 }
 
-/* ---------------- toast + demo submit ----------------
-   Replace useDemoSubmit with your BetterAuth client, e.g.:
-     const router = useRouter();
-     await authClient.signIn.email({ email, password });
-     router.push("/dashboard");
-*/
 export function Toast({ open, message }: { open: boolean; message: string }) {
   return (
     <div className="ln-toast" data-open={open} role="status" aria-live="polite">

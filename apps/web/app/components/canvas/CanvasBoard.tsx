@@ -9,6 +9,7 @@ import {
   hitTest, translateShape, stateAtSeq,setTheme, getThemeBg, type Theme,
 } from "../../../lib/canvas/canvas";
 import { useRouter } from "next/navigation";
+import { BACKEND_URL } from "../../../config";
 
 const TOOLS: { id: Tool; glyph: string; key: string }[] = [
   { id: "select", glyph: "↖", key: "v" },
@@ -22,7 +23,7 @@ const TOOLS: { id: Tool; glyph: string; key: string }[] = [
 
 const MIN_POINT_DIST_SQ = 4;
 
-export default function CanvasBoard({ roomId }: { roomId: number }) {
+export default function CanvasBoard({ slug }: { slug: string }) {
   const router = useRouter();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const shapesRef = useRef<Shape[]>([]);
@@ -32,30 +33,20 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
   const { socket, loading } = useSocket();
   const zoomToFitRef = useRef<() => void>(() => {});
   const undoStackRef = useRef<CanvasOp[]>([]);
-
-  // The in-memory op-log: ordered, seq-stamped. Hydration fills it; live ops
-  // and our own acks append to it. Time-travel folds prefixes of this.
+  const [roomId, setRoomId] = useState<number | null>(null);
+  const [roomError, setRoomError] = useState(false);
   const opLogRef = useRef<CanvasOp[]>([]);
-
   const [tool, setTool] = useState<Tool>("select");
   const toolRef = useRef<Tool>("select");
   const [zoomPct, setZoomPct] = useState(100);
-
-  // Menu (Excalidraw-style hamburger). Time-travel lives inside it for now;
-  // dashboard / user / theme / logout will join it later.
   const [menuOpen, setMenuOpen] = useState(false);
-  const [theme, setThemeState] = useState<Theme>("dark"); // fixed for SSR match
-
+  const [theme, setThemeState] = useState<Theme>("dark"); 
   const toggleTheme = () => setThemeState((t) => (t === "dark" ? "light" : "dark"));
-
-  // Time-travel: state drives the slider UI, refs drive the canvas handlers.
   const [travelActive, setTravelActive] = useState(false);
   const [travelSeq, setTravelSeq] = useState(0);
   const [maxSeq, setMaxSeq] = useState(0);
   const travelActiveRef = useRef(false);
   const travelSeqRef = useRef(0);
-
-  // Active text editor: screen position + current value, or null when inactive.
   const [textEditor, setTextEditor] = useState<{ sx: number; sy: number; wx: number; wy: number } | null>(null);
   const [textValue, setTextValue] = useState("");
   const textValueRef = useRef("");
@@ -81,10 +72,10 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
 
   const commitText = () => {
     const ed = textEditorRef.current;
-    const value = textValueRef.current.trim();   // ref, not stale state
+    const value = textValueRef.current.trim();
     setTextEditor(null);
     setTextValue("");
-    if (!ed || value.length === 0) return; // discard empty
+    if (!ed || value.length === 0) return;
     setTextValue("");
 
     const shape: Shape = {
@@ -99,7 +90,6 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
     emitTextRef.current(shape);
   };
 
-  // Zoom the camera toward the viewport center (used by the +/- buttons).
   const applyZoom = (factor: number) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -131,7 +121,7 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
     if (!bounds) { resetZoom(); return; }
 
     const dpr = window.devicePixelRatio || 1;
-    const cssW = canvas.width / dpr;   // back to CSS pixels
+    const cssW = canvas.width / dpr;   
     const cssH = canvas.height / dpr;
 
     const pad = 80;
@@ -148,7 +138,7 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
     const cy = (bounds.minY + bounds.maxY) / 2;
     cameraRef.current = {
       scale,
-      x: cssW / 2 - cx * scale,   // center in CSS-pixel space
+      x: cssW / 2 - cx * scale,   
       y: cssH / 2 - cy * scale,
     };
     setZoomPct(Math.round(scale * 100));
@@ -157,7 +147,6 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
 
   zoomToFitRef.current = zoomToFit;
 
-  // Highest seq present in the log (current head).
   const currentMaxSeq = () => {
     const log = opLogRef.current;
     let m = 0;
@@ -172,14 +161,14 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
     travelSeqRef.current = max;
     setTravelActive(true);
     travelActiveRef.current = true;
-    selectedIdRef.current = null; // no selection in read-only past
+    selectedIdRef.current = null; 
     redrawRef.current();
   };
 
   const exitTravel = () => {
     setTravelActive(false);
     travelActiveRef.current = false;
-    redrawRef.current(); // snap back to live head (which may include others' ops)
+    redrawRef.current(); 
   };
 
   const onScrub = (n: number) => {
@@ -188,14 +177,38 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
     redrawRef.current();
   };
 
-  // On mount (client only), load the saved theme.
+
+  useEffect(() => {
+    const token = localStorage.getItem("token") ?? "";
+    fetch(`${BACKEND_URL}/room/${slug}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => {
+        if (res.status === 401) { 
+          localStorage.removeItem("token"); router.push("/signin"); return null; 
+        }
+        if (!res.ok) { 
+          setRoomError(true); return null; 
+        }
+        return res.json();
+      })
+      .then((data) => {
+        if (data?.room?.id) setRoomId(data.room.id);
+        else if (data !== null) setRoomError(true);
+      })
+      .catch(() => setRoomError(true));
+
+  }, [slug, router]);
+
+  
+
+
   useEffect(() => {
     const saved = localStorage.getItem("linea-theme") as Theme | null;
     if (saved && saved !== theme) setThemeState(saved);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // run once
+  }, []); 
 
-  // Apply theme to the canvas palette, persist, repaint.
   useEffect(() => {
     setTheme(theme);
     localStorage.setItem("linea-theme", theme);
@@ -213,7 +226,7 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
         zoomToFitRef.current();
         return;
       }
-      if (travelActiveRef.current) return; // tools disabled while viewing the past
+      if (travelActiveRef.current) return; 
       const t = map[e.key.toLowerCase()];
       if (t) selectTool(t);
     };
@@ -227,13 +240,12 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     if (!socket || loading) return;
+    if (roomId == null ) return;
 
-    // Central repaint: in travel mode, paint the folded prefix; else live shapes.
     redrawRef.current = () => {
       const shapes = travelActiveRef.current
         ? stateAtSeq(opLogRef.current, travelSeqRef.current)
         : shapesRef.current;
-      // Selection highlight only in live mode.
       const sel = travelActiveRef.current ? null : selectedIdRef.current;
       redraw(ctx, canvas, shapes, cameraRef.current, sel);
     };
@@ -249,13 +261,12 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
     resize();
     window.addEventListener("resize", resize);
 
-    // Hydration buffers live ops that land during the fetch, then flushes them.
     let hydrating = true;
     const opBuffer: CanvasOp[] = [];
 
     const loadOps = async () => {
       const ops = await fetchOperations(roomId);
-      opLogRef.current = [...ops];        // seed the in-memory log
+      opLogRef.current = [...ops];        
       let shapes: Shape[] = [];
       for (const op of ops) shapes = applyOp(shapes, op);
       for (const op of opBuffer) {
@@ -275,7 +286,6 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
       try {
         const data = JSON.parse(event.data);
 
-        // Ack for one of OUR ops: backfill the server-assigned seq in the log.
         if (data.type === "op_ack") {
           const entry = opLogRef.current.find(
             (o) => o.shapeId === data.shapeId && o.seq === undefined
@@ -295,15 +305,13 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
             opBuffer.push(op);
             return;
           }
-          // Always record in the log (so it's on the timeline)...
+
           opLogRef.current.push(op);
-          // ...and fold into live state.
           shapesRef.current = applyOp(shapesRef.current, op);
           if (op.opType === "DELETE" && selectedIdRef.current === op.shapeId) {
             selectedIdRef.current = null;
           }
-          // If we're viewing the past, don't disturb the frozen frame — the op
-          // is in the log and will be there when we exit travel.
+
           if (!travelActiveRef.current) redrawRef.current();
         }
       } catch {
@@ -312,10 +320,9 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
     };
     socket.addEventListener("message", onSocketMessage);
 
-    // Apply locally + broadcast + record in the log (seq backfilled by ack).
     const emitOp = (op: CanvasOp) => {
       shapesRef.current = applyOp(shapesRef.current, op);
-      opLogRef.current.push({ ...op, seq: undefined }); // awaiting ack
+      opLogRef.current.push({ ...op, seq: undefined }); 
       socket.send(JSON.stringify({
         type: "op",
         roomId,
@@ -339,7 +346,6 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
       redrawRef.current();
     };
 
-    // ---- interaction state ----
     let drawing = false;
     let startX = 0;
     let startY = 0;
@@ -420,7 +426,6 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
         return;
       }
 
-      // TEXT tool: open an input overlay at the click point.
       if (toolRef.current === "text") {
         e.preventDefault();
         console.log("TEXT branch hit, opening editor at, ", sx, sy);
@@ -505,7 +510,6 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
           return
         }
         undoStackRef.current.push({ opType: "UPDATE", shapeId: orig.id, payload: orig });
-        // Local state already reflects `moved`; record in log + broadcast.
         opLogRef.current.push({ opType: "UPDATE", shapeId: moved.id, payload: moved, seq: undefined });
         socket.send(JSON.stringify({
           type: "op",
@@ -586,6 +590,19 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
     };
   }, [roomId, socket, loading]);
 
+  if (roomError) {
+    return (
+      <div className="fixed inset-0 grid place-items-center bg-[#0b0d0c] text-neutral-300">
+        <div className="text-center">
+          <p className="text-lg">Canvas not found</p>
+          <button onClick={() => router.push("/dashboard")} className="mt-3 text-[#a6ff5e] hover:underline">
+            Back to dashboard
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
       <canvas
@@ -664,7 +681,6 @@ export default function CanvasBoard({ roomId }: { roomId: number }) {
             </div>
           )}
 
-          {/* Placeholders — wired in the dashboard/theme step */}
           <div className="mt-3 space-y-1 border-t border-white/10 pt-3 text-sm text-neutral-500">
                       
             <button

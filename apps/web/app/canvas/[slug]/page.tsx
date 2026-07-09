@@ -3,8 +3,8 @@ import CanvasBoard from "../../components/canvas/CanvasBoard";
 export default async function CanvasPage({
   params,
 }: {
-  params: Promise<{ roomId: string }>;
+  params: Promise<{ slug: string }>;
 }) {
-  const { roomId } = await params;
-  return <CanvasBoard roomId={Number(roomId)} />;   
+  const { slug } = await params;
+  return <CanvasBoard slug={slug} />;   
 }

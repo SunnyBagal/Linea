@@ -59,8 +59,7 @@ export default function Dashboard() {
         { slug },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      // Navigate straight into the new canvas by its numeric id.
-      router.push(`/canvas/${res.data.roomId}`);
+      router.push(`/canvas/${res.data.slug}`);
     } catch (err) {
       setCreating(false);
       if (axios.isAxiosError(err)) {
@@ -80,12 +79,13 @@ export default function Dashboard() {
 
   function joinRoom(e: React.FormEvent) {
     e.preventDefault();
-    const id = Number(joinId.trim());
-    if (Number.isNaN(id) || id <= 0) {
-      setError("Enter a valid canvas id.");
+    const s = joinId.trim();
+    if (s.length < 3) {
+      setError("Enter a valid canvas code.")
       return;
     }
-    router.push(`/canvas/${id}`);
+
+    router.push(`/canvas/${s}`);
   }
 
   function logout() {
@@ -108,7 +108,6 @@ export default function Dashboard() {
           </button>
         </div>
 
-        {/* Create + Join */}
         <div
           style={{
             display: "grid",
@@ -172,13 +171,12 @@ export default function Dashboard() {
               padding: 16,
             }}
           >
-            <label className="ln-text-2" style={{ fontSize: 13 }}>Join by canvas id</label>
+            <label className="ln-text-2" style={{ fontSize: 13 }}>Join by canvas code</label>
             <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
               <input
                 value={joinId}
                 onChange={(e) => setJoinId(e.target.value)}
-                placeholder="e.g. 5"
-                inputMode="numeric"
+                placeholder="ex-a464b5bbc48a"
                 style={{
                   flex: 1,
                   background: "rgba(255,255,255,0.04)",
@@ -213,7 +211,6 @@ export default function Dashboard() {
           <p style={{ color: "tomato", fontSize: 14, marginBottom: 16 }}>{error}</p>
         )}
 
-        {/* Room list */}
         {loading ? (
           <p className="ln-text-2" style={{ fontSize: 14 }}>Loading your canvases…</p>
         ) : rooms.length === 0 ? (
@@ -235,7 +232,7 @@ export default function Dashboard() {
             {rooms.map((room) => (
               <button
                 key={room.id}
-                onClick={() => router.push(`/canvas/${room.id}`)}
+                onClick={() => router.push(`/canvas/${room.slug}`)}
                 style={{
                   textAlign: "left",
                   background: "#0e1110",

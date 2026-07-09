@@ -27,7 +27,7 @@ model Room {
   adminId    String
   admin      User         @relation(fields: [adminId], references: [id])
 
-  currentSeq Int          @default(0)   // monotonic op counter for this room
+  currentSeq Int          @default(0)   
   operations Operation[]
   snapshots  Snapshot[]
   chats      Chat[]
@@ -44,25 +44,25 @@ enum OpType {
 model Operation {
   id        BigInt   @id @default(autoincrement())
   roomId    Int
-  seq       Int                      // per-room version number — makes "version N" meaningful
+  seq       Int                      
   type      OpType
-  shapeId   String                   // which element this op touches
-  payload   Json                     // diff/shape data; opaque to the DB, applied by your reducer
+  shapeId   String                   
+  payload   Json                     
   userId    String
   createdAt DateTime @default(now())
 
   room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
   user      User     @relation(fields: [userId], references: [id])
 
-  @@unique([roomId, seq])            // no gaps/dupes; also indexes the range scan
-  @@index([roomId, shapeId])         // "history of this one shape"
+  @@unique([roomId, seq])            
+  @@index([roomId, shapeId])         
 }
 
 model Snapshot {
   id        BigInt   @id @default(autoincrement())
   roomId    Int
-  seq       Int                      // full state after applying ops up to & incl. this seq
-  state     Json                     // materialized board
+  seq       Int                      
+  state     Json                     
   createdAt DateTime @default(now())
 
   room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)

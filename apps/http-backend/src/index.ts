@@ -125,7 +125,7 @@ app.post("/room", authMiddleware, async (req, res) => {
 
       } catch (error) {
         if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-          continue; // slug collided, try again
+          continue;
         }
         throw error;
       }
@@ -244,9 +244,10 @@ app.get("/room/:slug", authMiddleware, async (req, res) => {
       message: "Room not found" 
     });
   }
+  console.log(slug, room.id)
 
   return res.json({ 
-    room 
+     room
   });
 });
 
