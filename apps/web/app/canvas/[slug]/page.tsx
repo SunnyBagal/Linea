@@ -6,5 +6,6 @@ export default async function CanvasPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  return <CanvasBoard slug={slug} />;   
+  return <CanvasBoard slug={slug} />;    
 }
+

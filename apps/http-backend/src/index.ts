@@ -11,7 +11,15 @@ import { randomBytes } from "crypto";
 
 const app = express();
 app.use(express.json());
-app.use(cors({ origin: "http://localhost:3000"}))
+
+// Comma-separated allowlist so prod (Vercel) origins can be added via env
+// without a code change. Falls back to the local dev frontend origin.
+const allowedOrigins = (process.env.CORS_ORIGINS ?? "http://localhost:3000")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+app.use(cors({ origin: allowedOrigins }))
 
 function generateSlug(): string {
   return randomBytes(6).toString("hex");
@@ -251,7 +259,9 @@ app.get("/room/:slug", authMiddleware, async (req, res) => {
   });
 });
 
-const PORT = 3005;
+// Railway injects PORT; bind it so the health check passes. Falls back to
+// 3005 for local dev (Number(...) || keeps the type as `number`).
+const PORT = Number(process.env.PORT) || 3005;
 app.listen(PORT, () => {
   console.log(`server is running on http://localhost:${PORT}`);
 });

@@ -118,7 +118,9 @@ export default function CanvasBoard({ slug }: { slug: string }) {
       ? stateAtSeq(opLogRef.current, travelSeqRef.current)
       : shapesRef.current;
     const bounds = getShapesBounds(shapes);
-    if (!bounds) { resetZoom(); return; }
+    if (!bounds) { 
+      resetZoom(); return; 
+    }
 
     const dpr = window.devicePixelRatio || 1;
     const cssW = canvas.width / dpr;   
