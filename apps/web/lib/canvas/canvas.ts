@@ -481,10 +481,51 @@ export function applyOp(shapes: Shape[], op: CanvasOp): Shape[] {
 
 }
 
+// O(n) batch replay of an op log, equivalent to ops.reduce(applyOp, []) but
+// without rebuilding the whole array per op (that fold is O(n^2)). Keeps a Map
+// keyed by shapeId; Map iteration order == insertion order, which mirrors the
+// append-order applyOp produces: the first successful CREATE fixes a shape's
+// position, UPDATE replaces it in place, DELETE removes it, and a later
+// re-CREATE re-appends at the end.
+//
+// We fold in ARRAY order and never sort. That is what guarantees
+// foldOps(ops) === ops.reduce(applyOp, []) element-for-element for ANY input,
+// and it keeps stateAtSeq correct for optimistic live ops whose seq is still
+// undefined. seq order is only asserted defensively (dev only), never enforced.
+//
+// Per-branch semantics are an exact mirror of applyOp above.
+export function foldOps(ops: CanvasOp[]): Shape[] {
+  if (process.env.NODE_ENV !== "production") {
+    let prev = -Infinity;
+    for (const op of ops) {
+      if (op.seq === undefined) continue;
+      if (op.seq < prev) {
+        console.warn("foldOps: ops not in non-decreasing seq order; folding in array order anyway");
+        break;
+      }
+      prev = op.seq;
+    }
+  }
+
+  const byId = new Map<string, Shape>();
+  for (const op of ops) {
+    if (op.opType === "CREATE") {
+      if (!op.payload) continue; // null payload -> no-op
+      if (byId.has(op.shapeId)) continue; // duplicate CREATE -> keep the first
+      byId.set(op.shapeId, op.payload);
+    } else if (op.opType === "UPDATE") {
+      if (!op.payload) continue; // null payload -> no-op
+      if (!byId.has(op.shapeId)) continue; // UPDATE of absent id -> no-op (adds nothing)
+      byId.set(op.shapeId, op.payload); // full replace (applyOp replaces, not merges)
+    } else if (op.opType === "DELETE") {
+      byId.delete(op.shapeId); // absent id -> no-op
+    }
+  }
+  return Array.from(byId.values());
+}
+
 export function stateAtSeq(ops: CanvasOp[], maxSeq: number): Shape[] {
-  return ops
-    .filter((o) => (o.seq ?? 0) <= maxSeq)
-    .reduce<Shape[]>((shapes, op) => applyOp(shapes, op), []);
+  return foldOps(ops.filter((o) => (o.seq ?? 0) <= maxSeq));
 }
 
 

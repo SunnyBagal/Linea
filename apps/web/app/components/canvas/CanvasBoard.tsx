@@ -5,7 +5,7 @@ import { Shape, Tool, Camera, ShapeGeometry, CanvasOp } from "../../../lib/canva
 import { useSocket } from "../../../hooks/useSocket";
 import {
   redraw, drawShape, buildShape, getCanvasPos, fetchOperations, simplify,
-  screenToWorld, MIN_SCALE, MAX_SCALE, getShapesBounds, applyOp,
+  screenToWorld, MIN_SCALE, MAX_SCALE, getShapesBounds, applyOp, foldOps,
   hitTest, translateShape, stateAtSeq,setTheme, getThemeBg, type Theme,
 } from "../../../lib/canvas/canvas";
 import { useRouter } from "next/navigation";
@@ -269,8 +269,7 @@ export default function CanvasBoard({ slug }: { slug: string }) {
     const loadOps = async () => {
       const ops = await fetchOperations(roomId);
       opLogRef.current = [...ops];        
-      let shapes: Shape[] = [];
-      for (const op of ops) shapes = applyOp(shapes, op);
+      let shapes: Shape[] = foldOps(ops); // O(n) batch replay of the fetched log
       for (const op of opBuffer) {
         opLogRef.current.push(op);
         shapes = applyOp(shapes, op);

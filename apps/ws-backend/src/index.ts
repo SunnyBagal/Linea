@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { JWT_SECRET } from '@repo/backend-common/config';
 import { prisma as prismaClient, Prisma } from '@repo/db/client';
 import { WsMessageSchema } from '@repo/common/types';
+import http from 'http';
 
 // Comma-separated allowlist. When unset (local dev) or for non-browser
 // clients with no Origin header, connections are allowed — so this only
@@ -19,12 +20,23 @@ function isOriginAllowed(origin: string | undefined): boolean {
   return allowedOrigins.includes(origin);
 }
 
+const server = http.createServer((req, res) => {
+  if (req.url === '/health' || req.url === '/'){
+    res.writeHead(200, { 'content-type': 'text/plain'});
+    res.end('ok');
+    return;
+  }
+  res.writeHead(404).end();
+});
+
 // Railway injects PORT; fall back to 8080 for local dev.
 const PORT = Number(process.env.PORT) || 8080;
 const wss = new WebSocketServer({
-  port: PORT,
+  server,
   verifyClient: (info: { origin: string }) => isOriginAllowed(info.origin),
 });
+
+server.listen(PORT, () => console.log(`ws server on ${PORT}`));
 
 interface Connection {
   ws: WebSocket;
@@ -223,6 +235,3 @@ const heartbeat = setInterval(() => {
 }, HEARTBEAT_MS);
 
 wss.on('close', () => clearInterval(heartbeat));
-
-
-console.log(`websocket server running on ws://localhost:${PORT}`);

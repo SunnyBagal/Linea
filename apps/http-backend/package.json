@@ -2,7 +2,7 @@
   "name": "http-backend",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch --env-file=../../packages/backend-common/.env --env-file=../../packages/db/.env src/index.ts",
     "build": "tsup",
@@ -11,19 +11,18 @@
   },
   "dependencies": {
     "@repo/db": "workspace:^",
-    "@types/express": "^5.0.6",
-    "@types/jsonwebtoken": "^9.0.10",
+    "@repo/backend-common": "workspace:*",
+    "@repo/common": "workspace:*",
     "argon2": "^0.44.0",
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3"
   },
   "devDependencies": {
-    "@node-rs/argon2": "^2.0.2",
-    "@repo/backend-common": "workspace:*",
-    "@repo/common": "workspace:*",
     "@repo/typescript-config": "workspace:*",
     "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
     "tsup": "^8.5.1",
     "tsx": "^4.22.4"
   },
@@ -32,3 +31,5 @@
   "license": "ISC",
   "type": "commonjs"
 }
+
+

@@ -2,7 +2,7 @@ import express from 'express';
 import argon2 from 'argon2';
 import jwt from 'jsonwebtoken';
 import { Prisma } from '@repo/db/client';            
-import { authMiddleware } from './middleware/middleware';
+import { authMiddleware } from './middleware/middleware.js';
 import { JWT_SECRET } from "@repo/backend-common/config";
 import { CreateRoomSchema, CreateUserSchema, SigninSchema } from "@repo/common/types";
 import { prisma } from "@repo/db/client";
@@ -12,8 +12,6 @@ import { randomBytes } from "crypto";
 const app = express();
 app.use(express.json());
 
-// Comma-separated allowlist so prod (Vercel) origins can be added via env
-// without a code change. Falls back to the local dev frontend origin.
 const allowedOrigins = (process.env.CORS_ORIGINS ?? "http://localhost:3000")
   .split(",")
   .map((origin) => origin.trim())
@@ -259,9 +257,17 @@ app.get("/room/:slug", authMiddleware, async (req, res) => {
   });
 });
 
+app.get("/health", (_req, res) => {
+  res.json({ ok: true })
+});
+
 // Railway injects PORT; bind it so the health check passes. Falls back to
 // 3005 for local dev (Number(...) || keeps the type as `number`).
 const PORT = Number(process.env.PORT) || 3005;
 app.listen(PORT, () => {
   console.log(`server is running on http://localhost:${PORT}`);
 });
+
+
+
+// pnpm install --frozen-lockfile && pnpm --filter @repo/db exec prisma generate && pnpm --filter http-backend build

@@ -1,0 +1,25 @@
+{
+  "name": "bench",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Replay/hydration benchmarks for Linea op-log folding.",
+  "scripts": {
+    "seed": "tsx --env-file=../packages/backend-common/.env --env-file=../packages/db/.env --env-file-if-exists=../.env.bench seed-ops.ts",
+    "replay": "tsx --env-file=../packages/backend-common/.env --env-file=../packages/db/.env --env-file-if-exists=../.env.bench bench-replay.ts",
+    "ws": "tsx --env-file=../packages/backend-common/.env --env-file=../packages/db/.env --env-file-if-exists=../.env.bench bench-ws.ts"
+  },
+  "dependencies": {
+    "@repo/common": "workspace:*",
+    "@repo/db": "workspace:^",
+    "jsonwebtoken": "^9.0.3",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^22.15.3",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.22.4",
+    "typescript": "5.9.2"
+  }
+}
