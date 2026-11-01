@@ -1,0 +1,53 @@
+{
+  "case": "db-outage",
+  "pass": false,
+  "env": {
+    "gitSha": "4225f362bd6bf13e122da15f1095cfd94f802727",
+    "serverSourceDirty": false,
+    "cpu": "Apple M1 Pro",
+    "cores": 10,
+    "memGb": 16,
+    "platform": "darwin 27.0.0",
+    "node": "v24.14.1"
+  },
+  "checks": [
+    {
+      "name": "op during the outage gets an error frame",
+      "pass": true
+    },
+    {
+      "name": "server survives op and chat during the outage",
+      "pass": true,
+      "detail": {
+        "code": 1,
+        "signal": null
+      }
+    },
+    {
+      "name": "server survives join_room during the outage",
+      "pass": false,
+      "detail": {
+        "code": 1,
+        "signal": null
+      }
+    },
+    {
+      "name": "ops flow again once the database returns",
+      "pass": false
+    },
+    {
+      "name": "db seq contiguous after the outage",
+      "pass": true
+    }
+  ],
+  "facts": {
+    "errorFrameForOp": true,
+    "aliveAfterOpAndChat": true,
+    "aliveAfterJoin": false,
+    "exitDuringOutage": {
+      "code": 1,
+      "signal": null
+    },
+    "logTail": "  },\n  clientVersion: '7.8.0'\n}\n\nNode.js v24.14.1\n"
+  }
+}

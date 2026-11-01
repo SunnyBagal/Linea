@@ -1,0 +1,42 @@
+{
+  "case": "unknown-room-join-over-int4",
+  "pass": false,
+  "env": {
+    "gitSha": "4225f362bd6bf13e122da15f1095cfd94f802727",
+    "serverSourceDirty": false,
+    "cpu": "Apple M1 Pro",
+    "cores": 10,
+    "memGb": 16,
+    "platform": "darwin 27.0.0",
+    "node": "v24.14.1"
+  },
+  "checks": [
+    {
+      "name": "server stays up",
+      "pass": false,
+      "detail": {
+        "exit": {
+          "code": 1,
+          "signal": null
+        },
+        "log": "        at async e.execute (/Users/sunny/Projects/graphite-ws-hardening/apps/ws-backend/dist/index.js:7124:16)\n        at async jt.request (/Users/sunny/Projects/graphite-ws-hardening/apps/ws-backend/dist/index.js:7667:19) {\n      cause: {\n        originalCode: '22003',\n        originalMessage: 'value \"1099511627776\" is out of range for type integer',\n        kind: 'ValueOutOfRange',\n        cause: 'value \"1099511627776\" is out of range for type integer'\n      }\n    }\n  },\n  clientVersion: '7.8.0'\n}\n\nNode.js v24.14.1\n"
+      }
+    },
+    {
+      "name": "sender is told about the failure",
+      "pass": false,
+      "detail": {
+        "replies": []
+      }
+    }
+  ],
+  "facts": {
+    "replies": [],
+    "exit": {
+      "code": 1,
+      "signal": null
+    },
+    "clientCloseCode": 1006,
+    "bystanderCloseCode": 1006
+  }
+}

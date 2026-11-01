@@ -1,0 +1,40 @@
+{
+  "case": "unknown-room-leave-unknown",
+  "pass": true,
+  "env": {
+    "gitSha": "4225f362bd6bf13e122da15f1095cfd94f802727",
+    "serverSourceDirty": false,
+    "cpu": "Apple M1 Pro",
+    "cores": 10,
+    "memGb": 16,
+    "platform": "darwin 27.0.0",
+    "node": "v24.14.1"
+  },
+  "checks": [
+    {
+      "name": "server stays up",
+      "pass": true,
+      "detail": {
+        "exit": null,
+        "log": "ws server on 18080\n"
+      }
+    },
+    {
+      "name": "other clients are unaffected",
+      "pass": true
+    },
+    {
+      "name": "real room seq is unaffected",
+      "pass": true,
+      "detail": {
+        "rows": 1
+      }
+    }
+  ],
+  "facts": {
+    "replies": [],
+    "exit": null,
+    "clientCloseCode": null,
+    "bystanderCloseCode": null
+  }
+}
