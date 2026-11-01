@@ -1,0 +1,30 @@
+{
+  "name": "@repo/loadtest",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Load and correctness harness for ws-backend. Local Postgres only.",
+  "scripts": {
+    "pg:up": "bash pg.sh up",
+    "pg:down": "bash pg.sh down",
+    "build:servers": "pnpm --filter ws-backend --filter http-backend build",
+    "throughput": "tsx src/throughput.ts",
+    "chaos": "node --import tsx --test --test-concurrency=1 --test-reporter=spec \"test/*.test.ts\"",
+    "report": "tsx src/report.ts",
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.21.0",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@repo/typescript-config": "workspace:*",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.22.4",
+    "typescript": "5.9.2"
+  }
+}
