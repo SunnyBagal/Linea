@@ -81,6 +81,41 @@ test('op sent to a room the client never joined is rejected', async () => {
     record.check('op from a non-member is not persisted', !persisted);
     record.check('frames from a non-member are not broadcast', member.frames.length === 0,
       { received: member.frames.map((f) => f.type) });
+    record.check('rejected op gets the existing error frame', outsider.ofType('error').length === 1,
+      { replies: outsider.frames.map((f) => f.type) });
+
+    // Sending right after join_room must still work while the room lookup is in flight.
+    const eager = await TestClient.connect(stack.ws.url, stack.token);
+    const eagerOps = [uid('eager'), uid('eager'), uid('eager')];
+    eager.join(stack.roomId);
+    for (const shapeId of eagerOps) eager.send(rectOp(stack.roomId, shapeId));
+    const allAcked = await eager.waitFor(() => eagerOps.every((id) => Boolean(eager.ackFor(id))), 3000);
+    record.check('ops sent straight after join_room are accepted, in order', allAcked
+      && eager.ofType('op_ack').every((ack, i) => ack.shapeId === eagerOps[i]),
+      { acks: eager.ofType('op_ack').map((ack) => ack.shapeId) });
+
+    // A pending join that fails must reject the op queued behind it.
+    const failedJoin = await TestClient.connect(stack.ws.url, stack.token);
+    failedJoin.join(999_999_999);
+    failedJoin.send(rectOp(999_999_999, uid('failed')));
+    await failedJoin.waitFor(() => failedJoin.ofType('error').length >= 2, 3000);
+    record.check('op behind a failed join is rejected', failedJoin.ofType('error').length === 2
+      && failedJoin.ofType('op_ack').length === 0, { replies: failedJoin.frames.map((f) => f.type) });
+
+    // leave_room while the join is pending must leave the client out of the room.
+    const leaver = await TestClient.connect(stack.ws.url, stack.token);
+    leaver.join(stack.roomId);
+    leaver.send({ type: 'leave_room', roomId: stack.roomId });
+    await sleep(300);
+    const framesBefore = leaver.frames.length;
+    const probe = uid('probe');
+    eager.send(rectOp(stack.roomId, probe));
+    await eager.waitFor(() => Boolean(eager.ackFor(probe)), 3000);
+    await sleep(200);
+    record.check('leave_room during a pending join wins', leaver.frames.length === framesBefore,
+      { received: leaver.frames.slice(framesBefore).map((f) => f.type) });
+
+    for (const client of [eager, failedJoin, leaver]) client.close();
     member.close();
     outsider.close();
   } finally {

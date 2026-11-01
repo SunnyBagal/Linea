@@ -46,6 +46,7 @@ interface Connection {
   ws: WebSocket;
   userId: string;
   rooms: Set<number>;   
+  joining: Map<number, Promise<boolean>>;
   isAlive: boolean;     
 }
 
@@ -114,7 +115,7 @@ wss.on('connection', (ws, request) => {
     return;
   }
 
-  connections.set(ws, { ws, userId, rooms: new Set(), isAlive: true });
+  connections.set(ws, { ws, userId, rooms: new Set(), joining: new Map(), isAlive: true });
 
   ws.on('pong', () => {
     const conn = connections.get(ws);
@@ -150,22 +151,31 @@ wss.on('connection', (ws, request) => {
 
     if (msg.type === 'join_room') {
 
-      try {
-        const room = await prismaClient.room.findUnique({
-          where: {
-            id: msg.roomId
+      const lookup = prismaClient.room
+        .findUnique({
+          where: { 
+            id: msg.roomId 
           },
-          select: {
-            id: true
+          select: { 
+            id: true 
           },
+        })
+        .then((room) => room !== null)
+        .catch((err) => {
+          console.error('join_room failed', err);
+          return false;
         });
 
-        if (room) {
-          conn.rooms.add(msg.roomId);
-          return;
-        }
-      } catch (err) {
-        console.error('join_room failed', err);
+      conn.joining.set(msg.roomId, lookup);
+      const found = await lookup;
+
+      // A leave_room or a newer join_room arrived during the lookup, and it wins.
+      if (conn.joining.get(msg.roomId) !== lookup) return;
+      conn.joining.delete(msg.roomId);
+
+      if (found) {
+        conn.rooms.add(msg.roomId);
+        return;
       }
 
       send(ws, JSON.stringify({
@@ -176,10 +186,25 @@ wss.on('connection', (ws, request) => {
     }
 
     if (msg.type === 'leave_room') {
+      conn.joining.delete(msg.roomId);
       conn.rooms.delete(msg.roomId);
       return;
     }
 
+    // Clients may send right after join_room, so wait for a lookup still in flight.
+    if (!conn.rooms.has(msg.roomId)) {
+      await conn.joining.get(msg.roomId);
+    }
+
+    if (!conn.rooms.has(msg.roomId)) {
+      if (msg.type === 'op') {
+        send(ws, JSON.stringify({
+          type: 'error',
+          message: 'Failed to apply operation.'
+        }));
+      }
+      return;
+    }
 
     if (msg.type === 'chat') {
 
