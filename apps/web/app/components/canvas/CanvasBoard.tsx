@@ -10,6 +10,7 @@ import {
 } from "../../../lib/canvas/canvas";
 import { useRouter } from "next/navigation";
 import { BACKEND_URL } from "../../../config";
+import { applyAck, highestSeq, mergeCatchUp, type LogEntry } from "../../../lib/canvas/oplog";
 
 const TOOLS: { id: Tool; glyph: string; key: string }[] = [
   { id: "select", glyph: "↖", key: "v" },
@@ -22,6 +23,10 @@ const TOOLS: { id: Tool; glyph: string; key: string }[] = [
 ];
 
 const MIN_POINT_DIST_SQ = 4;
+// Hydrate anyway if room_joined doesn't arrive, as with a server that predates it.
+const JOIN_REPLY_TIMEOUT_MS = 3000;
+const CATCH_UP_RETRIES = 3;
+const CATCH_UP_RETRY_MS = 500;
 
 export default function CanvasBoard({ slug }: { slug: string }) {
   const router = useRouter();
@@ -35,7 +40,7 @@ export default function CanvasBoard({ slug }: { slug: string }) {
   const undoStackRef = useRef<CanvasOp[]>([]);
   const [roomId, setRoomId] = useState<number | null>(null);
   const [roomError, setRoomError] = useState(false);
-  const opLogRef = useRef<CanvasOp[]>([]);
+  const opLogRef = useRef<LogEntry[]>([]);
   const [tool, setTool] = useState<Tool>("select");
   const toolRef = useRef<Tool>("select");
   const [zoomPct, setZoomPct] = useState(100);
@@ -264,22 +269,40 @@ export default function CanvasBoard({ slug }: { slug: string }) {
     window.addEventListener("resize", resize);
 
     let hydrating = true;
+    let hydrateRun = 0;
+    let lastSeq = 0;
     const opBuffer: CanvasOp[] = [];
 
-    const loadOps = async () => {
-      const ops = await fetchOperations(roomId);
-      opLogRef.current = [...ops];        
-      let shapes: Shape[] = foldOps(ops); // O(n) batch replay of the fetched log
-      for (const op of opBuffer) {
-        opLogRef.current.push(op);
-        shapes = applyOp(shapes, op);
+    // Replies to ops sent on an earlier socket will never arrive. If those ops
+    // were saved, the fetch below brings them back.
+    opLogRef.current = opLogRef.current.filter((o) => o.seq !== undefined);
+
+    const hydrate = async (expectedSeq: number) => {
+      const run = ++hydrateRun;
+      let ops = await fetchOperations(roomId);
+      for (let i = 0; i < CATCH_UP_RETRIES && highestSeq(ops) < expectedSeq; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, CATCH_UP_RETRY_MS));
+        if (run !== hydrateRun) return;
+        ops = await fetchOperations(roomId);
       }
+      if (run !== hydrateRun) return;
+
+      const merged = mergeCatchUp(ops, opBuffer, opLogRef.current);
+      opLogRef.current = merged;
       opBuffer.length = 0;
+      lastSeq = highestSeq(merged);
+      const shapes = foldOps(merged); // O(n) batch replay of the merged log
       shapesRef.current = shapes;
+      if (selectedIdRef.current && !shapes.some((s) => s.id === selectedIdRef.current)) {
+        selectedIdRef.current = null;
+      }
       hydrating = false;
       redrawRef.current();
     };
-    loadOps();
+
+    const joinFallback = setTimeout(() => {
+      if (hydrating) hydrate(0);
+    }, JOIN_REPLY_TIMEOUT_MS);
 
     socket.send(JSON.stringify({ type: "join_room", roomId }));
 
@@ -287,11 +310,16 @@ export default function CanvasBoard({ slug }: { slug: string }) {
       try {
         const data = JSON.parse(event.data);
 
+        if (data.type === "room_joined") {
+          if (data.roomId !== roomId) return;
+          clearTimeout(joinFallback);
+          hydrate(data.seq);
+          return;
+        }
+
         if (data.type === "op_ack") {
-          const entry = opLogRef.current.find(
-            (o) => o.shapeId === data.shapeId && o.seq === undefined
-          );
-          if (entry) entry.seq = data.seq;
+          opLogRef.current = applyAck(opLogRef.current, data.shapeId, data.seq);
+          lastSeq = Math.max(lastSeq, data.seq);
           return;
         }
 
@@ -306,6 +334,9 @@ export default function CanvasBoard({ slug }: { slug: string }) {
             opBuffer.push(op);
             return;
           }
+          // Frames arrive in seq order, so anything at or below lastSeq came with the fetch.
+          if (data.seq <= lastSeq) return;
+          lastSeq = data.seq;
 
           opLogRef.current.push(op);
           shapesRef.current = applyOp(shapesRef.current, op);
@@ -580,6 +611,8 @@ export default function CanvasBoard({ slug }: { slug: string }) {
     window.addEventListener("keyup", onKeyUp);
 
     return () => {
+      hydrateRun += 1;
+      clearTimeout(joinFallback);
       window.removeEventListener("resize", resize);
       socket.removeEventListener("message", onSocketMessage);
       canvas.removeEventListener("mousedown", onDown);

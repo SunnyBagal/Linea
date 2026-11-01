@@ -110,6 +110,14 @@ function broadcast(roomId: number, payload: unknown, exclude?: WebSocket) {
   }
 }
 
+function rejectJoin(ws: WebSocket, roomId: number) {
+  send(ws, JSON.stringify({
+    type: 'error',
+    roomId,
+    message: 'Failed to join room.'
+  }));
+}
+
 function rejectOp(op: PendingOp) {
   send(op.ws, JSON.stringify({
     type: 'error',
@@ -321,14 +329,43 @@ wss.on('connection', (ws, request) => {
       if (conn.joining.get(msg.roomId) !== lookup) return;
       conn.joining.delete(msg.roomId);
 
-      if (found) {
-        conn.rooms.add(msg.roomId);
+      if (!found) {
+        rejectJoin(ws, msg.roomId);
+        return;
+      }
+
+      // Join first, then read the seq. Any op above that seq commits after this
+      // client is a member, so it gets broadcast here. Everything up to it is
+      // already in the database. Together they let the client catch up exactly.
+      conn.rooms.add(msg.roomId);
+      const seq = await prismaClient.room
+        .findUnique({
+          where: {
+            id: msg.roomId
+          },
+          select: {
+            currentSeq: true
+          },
+        })
+        .then((room) => room?.currentSeq ?? null)
+        .catch((err) => {
+          console.error('join_room failed', err);
+          return null;
+        });
+
+      // A leave_room during the read wins, and a newer join_room sends its own reply.
+      if (!conn.rooms.has(msg.roomId) || conn.joining.has(msg.roomId)) return;
+
+      if (seq === null) {
+        conn.rooms.delete(msg.roomId);
+        rejectJoin(ws, msg.roomId);
         return;
       }
 
       send(ws, JSON.stringify({
-        type: 'error',
-        message: 'Failed to join room.'
+        type: 'room_joined',
+        roomId: msg.roomId,
+        seq,
       }));
       return;
     }
