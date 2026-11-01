@@ -1,0 +1,49 @@
+{
+  "case": "ordering-backlog",
+  "pass": true,
+  "env": {
+    "gitSha": "ce2deb374ded08db568d9b79653d1c1f5b85cc5c",
+    "serverSourceDirty": false,
+    "cpu": "Apple M1 Pro",
+    "cores": 10,
+    "memGb": 16,
+    "platform": "darwin 27.0.0",
+    "node": "v24.14.1"
+  },
+  "checks": [
+    {
+      "name": "every op gets an ack or an error",
+      "pass": true,
+      "detail": {
+        "answered": 5001,
+        "total": 5000
+      }
+    },
+    {
+      "name": "the backlog drains shortly after the wait limit",
+      "pass": true,
+      "detail": {
+        "drainMs": 2013.3839999999982
+      }
+    },
+    {
+      "name": "the room accepts ops again",
+      "pass": true,
+      "detail": {
+        "recoverMs": 46.27379100000326
+      }
+    },
+    {
+      "name": "database seq contiguous",
+      "pass": true
+    }
+  ],
+  "facts": {
+    "sent": 5000,
+    "acked": 145,
+    "errors": 4856,
+    "drainMsAfterLastSend": 2013.3839999999982,
+    "recoverMs": 46.27379100000326,
+    "peakRssMb": 130.5625
+  }
+}

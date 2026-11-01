@@ -1,0 +1,123 @@
+{
+  "case": "reconnect-mid-burst",
+  "pass": false,
+  "env": {
+    "gitSha": "c6d8459bef23f26c46f03d3ffa98778611528907",
+    "serverSourceDirty": false,
+    "cpu": "Apple M1 Pro",
+    "cores": 10,
+    "memGb": 16,
+    "platform": "darwin 27.0.0",
+    "node": "v24.14.1"
+  },
+  "checks": [
+    {
+      "name": "server survives abrupt disconnects",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "every acked op is in the database",
+      "pass": true,
+      "detail": {
+        "ackedMissing": 0
+      }
+    },
+    {
+      "name": "db seq contiguous from 1",
+      "pass": true
+    },
+    {
+      "name": "currentSeq equals max seq",
+      "pass": true
+    },
+    {
+      "name": "catch-up leaves no missing ops",
+      "pass": true,
+      "detail": {
+        "totalMissing": 0
+      }
+    },
+    {
+      "name": "catch-up leaves no duplicate ops",
+      "pass": false,
+      "detail": {
+        "totalDuplicates": 20
+      }
+    },
+    {
+      "name": "final session matches the database exactly",
+      "pass": true,
+      "detail": {
+        "entries": 3780,
+        "maxSeen": 3780,
+        "missing": 0,
+        "duplicates": 0
+      }
+    }
+  ],
+  "facts": {
+    "cycles": 8,
+    "victimSent": 2196,
+    "victimAcked": 2179,
+    "persistedButNeverAcked": 17,
+    "droppedUnacked": 0,
+    "sessionDiffs": [
+      {
+        "entries": 447,
+        "maxSeen": 430,
+        "missing": 0,
+        "duplicates": 17
+      },
+      {
+        "entries": 886,
+        "maxSeen": 886,
+        "missing": 0,
+        "duplicates": 0
+      },
+      {
+        "entries": 1319,
+        "maxSeen": 1318,
+        "missing": 0,
+        "duplicates": 1
+      },
+      {
+        "entries": 1783,
+        "maxSeen": 1782,
+        "missing": 0,
+        "duplicates": 1
+      },
+      {
+        "entries": 2238,
+        "maxSeen": 2237,
+        "missing": 0,
+        "duplicates": 1
+      },
+      {
+        "entries": 2696,
+        "maxSeen": 2696,
+        "missing": 0,
+        "duplicates": 0
+      },
+      {
+        "entries": 3155,
+        "maxSeen": 3155,
+        "missing": 0,
+        "duplicates": 0
+      },
+      {
+        "entries": 3615,
+        "maxSeen": 3615,
+        "missing": 0,
+        "duplicates": 0
+      },
+      {
+        "entries": 3780,
+        "maxSeen": 3780,
+        "missing": 0,
+        "duplicates": 0
+      }
+    ],
+    "dbRows": 3780
+  }
+}

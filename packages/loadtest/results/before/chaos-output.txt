@@ -1,0 +1,189 @@
+✖ database outage does not take the server down (5460.348083ms)
+✖ duplicate op resend is idempotent (814.633541ms)
+✖ malformed frames leave the server and the connection usable (905.861125ms)
+✔ oversized payload: 1MiB valid op (3271.307042ms)
+✖ oversized payload: 8MiB valid op (3350.48875ms)
+✖ oversized payload: 64MiB valid op (4252.590875ms)
+✖ oversized payload: 64MiB schema-invalid frame (9448.452084ms)
+✔ oversized payload: 110MiB frame over the ws default (3553.034541ms)
+✖ client disconnects mid-burst and reconnects with the browser catch-up flow (8299.07475ms)
+✔ server restart mid-session: crash (SIGKILL) (7920.803666ms)
+✖ server restart mid-session: deploy (SIGTERM) (7891.159375ms)
+✖ slow consumer does not grow server memory without bound (152939.3165ms)
+✔ two rooms running concurrently do not cross-talk (16441.143667ms)
+✖ op sent to a room the client never joined is rejected (785.440625ms)
+✖ unknown room: join-unknown (829.759792ms)
+✔ unknown room: op-unknown (806.053375ms)
+✖ unknown room: chat-unknown (759.982792ms)
+✔ unknown room: leave-unknown (803.968167ms)
+✖ unknown room: join-over-int4 (779.021959ms)
+✔ unknown room: op-over-int4 (856.848167ms)
+✖ unknown room: chat-over-int4 (804.188292ms)
+✖ unknown room: join-negative (812.2555ms)
+ℹ tests 22
+ℹ suites 0
+ℹ pass 7
+ℹ fail 15
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 233113.063833
+
+✖ failing tests:
+
+test at test/db-outage.test.ts:1:449
+✖ database outage does not take the server down (5460.348083ms)
+  Error: Failed checks:
+   - server survives join_room during the outage: {"code":1,"signal":null}
+   - ops flow again once the database returns: null
+      at CaseRecord.finish (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/src/lib.ts:374:13)
+      at TestContext.<anonymous> (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/test/db-outage.test.ts:68:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1125:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3)
+
+test at test/duplicate.test.ts:1:256
+✖ duplicate op resend is idempotent (814.633541ms)
+  Error: Failed checks:
+   - retry after ack creates one row: {"rows":2}
+   - in-flight double send creates one row: {"rows":2}
+   - observer sees the retried op once: null
+      at CaseRecord.finish (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/src/lib.ts:374:13)
+      at TestContext.<anonymous> (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/test/duplicate.test.ts:46:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1125:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3)
+
+test at test/malformed.test.ts:1:293
+✖ malformed frames leave the server and the connection usable (905.861125ms)
+  Error: Failed checks:
+   - invalid frames get an error reply: ["not json","truncated json","empty frame","json null","json array","json number","unknown type","op with no fields","string roomId","float roomId","bad opType","bad payload","proto key","binary frame","deep nesting"]
+      at CaseRecord.finish (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/src/lib.ts:374:13)
+      at TestContext.<anonymous> (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/test/malformed.test.ts:79:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1125:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3)
+
+test at test/oversized.test.ts:1:659
+✖ oversized payload: 8MiB valid op (3350.48875ms)
+  Error: Failed checks:
+   - oversized frame is not persisted: null
+   - oversized frame is rejected before parsing (close 1009): {"closeCode":null}
+      at CaseRecord.finish (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/src/lib.ts:374:13)
+      at TestContext.<anonymous> (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/test/oversized.test.ts:88:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1125:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7)
+
+test at test/oversized.test.ts:1:659
+✖ oversized payload: 64MiB valid op (4252.590875ms)
+  Error: Failed checks:
+   - oversized frame is not persisted: null
+   - oversized frame is rejected before parsing (close 1009): {"closeCode":null}
+      at CaseRecord.finish (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/src/lib.ts:374:13)
+      at TestContext.<anonymous> (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/test/oversized.test.ts:88:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1125:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7)
+
+test at test/oversized.test.ts:1:659
+✖ oversized payload: 64MiB schema-invalid frame (9448.452084ms)
+  Error: Failed checks:
+   - oversized frame is rejected before parsing (close 1009): {"closeCode":null}
+   - a rejected frame is not copied into the log: {"logAdded":67109312}
+      at CaseRecord.finish (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/src/lib.ts:374:13)
+      at TestContext.<anonymous> (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/test/oversized.test.ts:88:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1125:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7)
+
+test at test/reconnect.test.ts:1:172
+✖ client disconnects mid-burst and reconnects with the browser catch-up flow (8299.07475ms)
+  Error: Failed checks:
+   - catch-up leaves no duplicate ops: {"totalDuplicates":20}
+      at CaseRecord.finish (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/src/lib.ts:374:13)
+      at TestContext.<anonymous> (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/test/reconnect.test.ts:83:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1125:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3)
+
+test at test/restart.test.ts:1:3852
+✖ server restart mid-session: deploy (SIGTERM) (7891.159375ms)
+  Error: Failed checks:
+   - SIGTERM closes sockets with 1001 or 1012: {"closeCodes":[1006,1006,1006]}
+      at CaseRecord.finish (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/src/lib.ts:374:13)
+      at restartCase (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/test/restart.test.ts:91:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1125:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7)
+
+test at test/slow-consumer.test.ts:1:2347
+✖ slow consumer does not grow server memory without bound (152939.3165ms)
+  Error: Failed checks:
+   - buffer for one stalled socket stays under the limit: {"peakBufferedMb":175.20227146148682,"limitMb":32}
+      at CaseRecord.finish (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/src/lib.ts:374:13)
+      at TestContext.<anonymous> (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/test/slow-consumer.test.ts:94:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1125:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3)
+
+test at test/two-rooms.test.ts:1:2712
+✖ op sent to a room the client never joined is rejected (785.440625ms)
+  Error: Failed checks:
+   - op from a non-member is not persisted: null
+   - frames from a non-member are not broadcast: {"received":["chat","op"]}
+      at CaseRecord.finish (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/src/lib.ts:374:13)
+      at TestContext.<anonymous> (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/test/two-rooms.test.ts:89:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1125:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7)
+
+test at test/unknown-room.test.ts:1:1142
+✖ unknown room: join-unknown (829.759792ms)
+  Error: Failed checks:
+   - sender is told about the failure: {"replies":["op"]}
+      at CaseRecord.finish (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/src/lib.ts:374:13)
+      at TestContext.<anonymous> (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/test/unknown-room.test.ts:56:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1125:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3)
+
+test at test/unknown-room.test.ts:1:1142
+✖ unknown room: chat-unknown (759.982792ms)
+  Error: Failed checks:
+   - sender is told about the failure: {"replies":["op"]}
+      at CaseRecord.finish (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/src/lib.ts:374:13)
+      at TestContext.<anonymous> (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/test/unknown-room.test.ts:56:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1125:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7)
+
+test at test/unknown-room.test.ts:1:1142
+✖ unknown room: join-over-int4 (779.021959ms)
+  Error: Failed checks:
+   - server stays up: {"exit":{"code":1,"signal":null},"log":"        at async e.execute (/Users/sunny/Projects/graphite-ws-hardening/apps/ws-backend/dist/index.js:7124:16)\n        at async jt.request (/Users/sunny/Projects/graphite-ws-hardening/apps/ws-backend/dist/index.js:7667:19) {\n      cause: {\n        originalCode: '22003',\n        originalMessage: 'value \"1099511627776\" is out of range for type integer',\n        kind: 'ValueOutOfRange',\n        cause: 'value \"1099511627776\" is out of range for type integer'\n      }\n    }\n  },\n  clientVersion: '7.8.0'\n}\n\nNode.js v24.14.1\n"}
+   - sender is told about the failure: {"replies":[]}
+      at CaseRecord.finish (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/src/lib.ts:374:13)
+      at TestContext.<anonymous> (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/test/unknown-room.test.ts:56:12)
+      at async Test.run (node:internal/test_runner/test:1125:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7)
+
+test at test/unknown-room.test.ts:1:1142
+✖ unknown room: chat-over-int4 (804.188292ms)
+  Error: Failed checks:
+   - sender is told about the failure: {"replies":["op"]}
+      at CaseRecord.finish (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/src/lib.ts:374:13)
+      at TestContext.<anonymous> (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/test/unknown-room.test.ts:56:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1125:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7)
+
+test at test/unknown-room.test.ts:1:1142
+✖ unknown room: join-negative (812.2555ms)
+  Error: Failed checks:
+   - sender is told about the failure: {"replies":["op"]}
+      at CaseRecord.finish (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/src/lib.ts:374:13)
+      at TestContext.<anonymous> (/Users/sunny/Projects/graphite-ws-hardening/packages/loadtest/test/unknown-room.test.ts:56:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1125:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7)

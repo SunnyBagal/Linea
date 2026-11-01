@@ -31,8 +31,13 @@ const server = http.createServer((req, res) => {
 
 // Railway injects PORT; fall back to 8080 for local dev.
 const PORT = Number(process.env.PORT) || 8080;
+const MAX_FRAME_BYTES = 1024 * 1024;
+const MAX_BUFFERED_BYTES = 8 * 1024 * 1024;
+const OP_QUEUE_TIMEOUT_MS = 2000;
+const SHUTDOWN_STEP_TIMEOUT_MS = 3000;
 const wss = new WebSocketServer({
   server,
+  maxPayload: MAX_FRAME_BYTES,
   verifyClient: (info: { origin: string }) => isOriginAllowed(info.origin),
 });
 
@@ -42,10 +47,13 @@ interface Connection {
   ws: WebSocket;
   userId: string;
   rooms: Set<number>;   
+  joining: Map<number, Promise<boolean>>;
   isAlive: boolean;     
 }
 
 const connections = new Map<WebSocket, Connection>();
+const roomQueues = new Map<number, Promise<void>>();
+let shuttingDown = false;
 
 function checkUser(token: string): string | null {
   try {
@@ -59,15 +67,40 @@ function checkUser(token: string): string | null {
   }
 }
 
+// A client that stops reading is disconnected rather than buffered without limit.
+// It catches up over HTTP when it reconnects, like after any other disconnect.
+function send(ws: WebSocket, data: string) {
+  if (ws.readyState !== WebSocket.OPEN) return;
+
+  if (ws.bufferedAmount + data.length > MAX_BUFFERED_BYTES) {
+    ws.terminate();
+    connections.delete(ws);
+    return;
+  }
+  ws.send(data);
+}
+
 function broadcast(roomId: number, payload: unknown, exclude?: WebSocket) {
   const data = JSON.stringify(payload);
   for (const conn of connections.values()) {
     if (conn.ws === exclude) continue;
-    
-    if (conn.rooms.has(roomId) && conn.ws.readyState === WebSocket.OPEN) {
-      conn.ws.send(data);
+
+    if (conn.rooms.has(roomId)) {
+      send(conn.ws, data);
     }
   }
+}
+
+// Commit, broadcast and ack run one op at a time per room. Concurrent transactions
+// could finish out of order, sending clients seq 6 before seq 5.
+function enqueueRoomTask(roomId: number, task: () => Promise<void>) {
+  const tail = (roomQueues.get(roomId) ?? Promise.resolve())
+    .then(task)
+    .catch((err) => console.error('room task failed', err))
+    .finally(() => {
+      if (roomQueues.get(roomId) === tail) roomQueues.delete(roomId);
+    });
+  roomQueues.set(roomId, tail);
 }
 
 wss.on('connection', (ws, request) => {
@@ -84,7 +117,7 @@ wss.on('connection', (ws, request) => {
     return;
   }
 
-  connections.set(ws, { ws, userId, rooms: new Set(), isAlive: true });
+  connections.set(ws, { ws, userId, rooms: new Set(), joining: new Map(), isAlive: true });
 
   ws.on('pong', () => {
     const conn = connections.get(ws);
@@ -107,35 +140,73 @@ wss.on('connection', (ws, request) => {
 
     const result = WsMessageSchema.safeParse(parsed);
     if (!result.success){
-      console.log("WS frome rejected: ", result.error.issues);
-      console.log(" raw frame was:", raw.toString());
+      // Frames are client-controlled, so log a capped summary and never the frame.
+      const issues = result.error.issues;
+      console.log("WS frame rejected:", {
+        bytes: raw.toString().length,
+        issueCount: issues.length,
+        issues: issues.slice(0, 3).map((issue) => ({ code: issue.code, path: issue.path.slice(0, 5).join('.').slice(0, 100) })),
+      });
       return;
     }
     const msg = result.data; 
 
     if (msg.type === 'join_room') {
 
-      const room = await prismaClient.room.findUnique({
-        where: { 
-          id: msg.roomId 
-        },
-        select: { 
-          id: true 
-        },
-      });
+      const lookup = prismaClient.room
+        .findUnique({
+          where: { 
+            id: msg.roomId 
+          },
+          select: { 
+            id: true 
+          },
+        })
+        .then((room) => room !== null)
+        .catch((err) => {
+          console.error('join_room failed', err);
+          return false;
+        });
 
-      if (room) {
-        conn.rooms.add(msg.roomId)
-      };
+      conn.joining.set(msg.roomId, lookup);
+      const found = await lookup;
 
+      // A leave_room or a newer join_room arrived during the lookup, and it wins.
+      if (conn.joining.get(msg.roomId) !== lookup) return;
+      conn.joining.delete(msg.roomId);
+
+      if (found) {
+        conn.rooms.add(msg.roomId);
+        return;
+      }
+
+      send(ws, JSON.stringify({
+        type: 'error',
+        message: 'Failed to join room.'
+      }));
       return;
     }
 
     if (msg.type === 'leave_room') {
+      conn.joining.delete(msg.roomId);
       conn.rooms.delete(msg.roomId);
       return;
     }
 
+    // Clients may send right after join_room, so wait for a lookup still in flight.
+    if (!conn.rooms.has(msg.roomId)) {
+      await conn.joining.get(msg.roomId);
+    }
+
+    if (!conn.rooms.has(msg.roomId)) {
+      if (msg.type === 'op') {
+        send(ws, JSON.stringify({
+          type: 'error',
+          message: 'Failed to apply operation.'
+        }));
+      }
+      return;
+    }
 
     if (msg.type === 'chat') {
 
@@ -155,57 +226,73 @@ wss.on('connection', (ws, request) => {
     }
 
     if (msg.type === 'op') {
-      try {
-        const op = await prismaClient.$transaction(async (tx) => {
-          const room = await tx.room.update({
-            where: { 
-              id: msg.roomId 
-            },
-            data: { 
-              currentSeq: { increment: 1 } 
-            },   
-            select: { 
-              currentSeq: true 
-            },
-          });
-
-          return tx.operation.create({
-            data: {
-              roomId: msg.roomId,
-              seq: room.currentSeq,
-              type: msg.opType,
-              shapeId: msg.shapeId,
-              payload: msg.payload ?? Prisma.JsonNull,
-              userId: conn.userId,
-            },
-            select: { seq: true },
-          });
-        });
-
-        broadcast(msg.roomId, {
-          type: 'op',
-          roomId: msg.roomId,
-          seq: op.seq,
-          opType: msg.opType,
-          shapeId: msg.shapeId,
-          payload: msg.payload,
-          userId: conn.userId,
-        }, ws);
-
-        ws.send(JSON.stringify({
-          type: 'op_ack',
-          roomId: msg.roomId,
-          shapeId: msg.shapeId,
-          seq: op.seq
+      if (shuttingDown) {
+        send(ws, JSON.stringify({
+          type: 'error',
+          message: 'Failed to apply operation.'
         }));
-
-      } catch (err) {
-        console.error('op persist failed', err);
-        ws.send(JSON.stringify({ 
-          type: 'error', 
-          message: 'Failed to apply operation.' 
-        }));
+        return;
       }
+
+      const receivedAt = Date.now();
+      enqueueRoomTask(msg.roomId, async () => {
+        try {
+          // Past the wait limit the client gets an error, not an unbounded queue.
+          if (Date.now() - receivedAt > OP_QUEUE_TIMEOUT_MS) {
+            throw new Error('op expired in room queue');
+          }
+
+          const op = await prismaClient.$transaction(async (tx) => {
+            const room = await tx.room.update({
+              where: { 
+                id: msg.roomId 
+              },
+              data: { 
+                currentSeq: { increment: 1 } 
+              },   
+              select: { 
+                currentSeq: true 
+              },
+            });
+
+            return tx.operation.create({
+              data: {
+                roomId: msg.roomId,
+                seq: room.currentSeq,
+                type: msg.opType,
+                shapeId: msg.shapeId,
+                payload: msg.payload ?? Prisma.JsonNull,
+                userId: conn.userId,
+              },
+              select: { seq: true },
+            });
+          });
+
+          broadcast(msg.roomId, {
+            type: 'op',
+            roomId: msg.roomId,
+            seq: op.seq,
+            opType: msg.opType,
+            shapeId: msg.shapeId,
+            payload: msg.payload,
+            userId: conn.userId,
+          }, ws);
+
+          send(ws, JSON.stringify({
+            type: 'op_ack',
+            roomId: msg.roomId,
+            shapeId: msg.shapeId,
+            seq: op.seq
+          }));
+
+        } catch (err) {
+          console.error('op persist failed', err);
+          send(ws, JSON.stringify({
+            type: 'error',
+            message: 'Failed to apply operation.'
+          }));
+        }
+      });
       return;
     }
   });
@@ -235,3 +322,31 @@ const heartbeat = setInterval(() => {
 }, HEARTBEAT_MS);
 
 wss.on('close', () => clearInterval(heartbeat));
+
+function shutdownStep(step: Promise<unknown>) {
+  return Promise.race([
+    step,
+    new Promise((resolve) => setTimeout(resolve, SHUTDOWN_STEP_TIMEOUT_MS)),
+  ]);
+}
+
+// Deploys send SIGTERM. Finish queued ops so their acks go out, then close clients
+// with 1001 so they know to reconnect.
+async function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  clearInterval(heartbeat);
+
+  await shutdownStep(Promise.allSettled(roomQueues.values()));
+
+  for (const conn of connections.values()) {
+    conn.ws.close(1001, 'Server restarting');
+  }
+  await shutdownStep(new Promise((resolve) => wss.close(resolve)));
+  server.close();
+  await shutdownStep(prismaClient.$disconnect());
+  process.exit(0);
+}
+
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);

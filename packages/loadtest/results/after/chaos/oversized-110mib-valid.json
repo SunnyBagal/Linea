@@ -1,0 +1,57 @@
+{
+  "case": "oversized-110mib-valid",
+  "pass": true,
+  "env": {
+    "gitSha": "ce2deb374ded08db568d9b79653d1c1f5b85cc5c",
+    "serverSourceDirty": false,
+    "cpu": "Apple M1 Pro",
+    "cores": 10,
+    "memGb": 16,
+    "platform": "darwin 27.0.0",
+    "node": "v24.14.1"
+  },
+  "checks": [
+    {
+      "name": "server stays up",
+      "pass": true,
+      "detail": {
+        "exit": null,
+        "log": "ws error RangeError: Max payload size exceeded\n    at Receiver.haveLength (/Users/sunny/Projects/graphite-ws-hardening/node_modules/.pnpm/ws@8.21.0/node_modules/ws/lib/receiver.js:441:28)\n    at Receiver.getPayloadLength64 (/Users/sunny/Projects/graphite-ws-hardening/node_modules/.pnpm/ws@8.21.0/node_modules/ws/lib/receiver.js:428:10)\n    at Receiver.startLoop (/Users/sunny/Projects/graphite-ws-hardening/node_modules/.pnpm/ws@8.21.0/node_modules/ws/lib/receiver.js:183:16)\n    at Receiver._write (/Users/sunny/Projects/graphite-ws-hardening/node_modules/.pnpm/ws@8.21.0/node_modules/ws/lib/receiver.js:116:10)\n    at writeOrBuffer (node:internal/streams/writable:570:12)\n    at _write (node:internal/streams/writable:499:10)\n    at Writable.write (node:internal/streams/writable:508:10)\n    at Socket.socketOnData (/Users/sunny/Projects/graphite-ws-hardening/node_modules/.pnpm/ws@8.21.0/node_modules/ws/lib/websocket.js:1374:35)\n    at Socket.emit (node:events:508:28)\n    at addChunk (node:internal/streams/readable:563:12) {\n  code: 'WS_ERR_UNSUPPORTED_MESSAGE_LENGTH',\n  Symbol(status-code): 1009\n}\n"
+      }
+    },
+    {
+      "name": "bystander connection survives",
+      "pass": true
+    },
+    {
+      "name": "oversized frame is not persisted",
+      "pass": true
+    },
+    {
+      "name": "oversized frame is rejected before parsing (close 1009)",
+      "pass": true,
+      "detail": {
+        "closeCode": 1009
+      }
+    },
+    {
+      "name": "a rejected frame is not copied into the log",
+      "pass": true,
+      "detail": {
+        "logAdded": 1107
+      }
+    }
+  ],
+  "facts": {
+    "frameBytes": 115343514,
+    "acked": false,
+    "persisted": false,
+    "attackerCloseCode": 1009,
+    "errorFrames": 0,
+    "rssBeforeMb": 121.3125,
+    "rssPeakMb": 197.5,
+    "logBytesAdded": 1107,
+    "bystanderWorstAckMs": 334.9236659999988,
+    "bystanderSamples": 127
+  }
+}
