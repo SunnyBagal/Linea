@@ -21,10 +21,12 @@ echo "== throughput, default sync"
 bash pg.sh reset
 npx tsx src/throughput.ts --label "$LABEL" --clients 5,20,50 --modes closed,open:800 --reps "$REPS"
 
-echo "== throughput, fsync_writethrough"
-bash pg.sh down >/dev/null
-PG_OPTS="-c wal_sync_method=fsync_writethrough" bash pg.sh up
-npx tsx src/throughput.ts --label "$LABEL-fullfsync" --clients 5,20,50 --modes closed,open:800 --reps "$REPS"
+if [ "${FULLFSYNC:-1}" != "0" ]; then
+  echo "== throughput, fsync_writethrough"
+  bash pg.sh down >/dev/null
+  PG_OPTS="-c wal_sync_method=fsync_writethrough" bash pg.sh up
+  npx tsx src/throughput.ts --label "$LABEL-fullfsync" --clients 5,20,50 --modes closed,open:800 --reps "$REPS"
+fi
 
 bash pg.sh down >/dev/null
 echo "RUN-ALL DONE"

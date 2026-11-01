@@ -10,7 +10,7 @@ import path from 'node:path';
 import { Worker } from 'node:worker_threads';
 import {
   auditRoom, db, environmentInfo, percentile, postgresCpuSeconds, postgresSettings, resultsDir,
-  seedRoom, seedUser, sleep, startBackend, tokenFor,
+  seedRoom, seedUser, sleep, startBackend, startDbProxy, tokenFor,
 } from './lib.ts';
 
 function arg(name: string, fallback: string): string {
@@ -26,6 +26,8 @@ const durationMs = Number(arg('duration', '60')) * 1000;
 const warmupMs = Number(arg('warmup', '5')) * 1000;
 const settleMs = Number(arg('settle', '20')) * 1000;
 const workerCount = Number(arg('workers', '4'));
+// Delays each database reply through a local proxy, to see how a fix behaves with network latency.
+const dbDelayMs = Number(arg('db-delay', '0'));
 const WS_PORT = 18090;
 
 const outDir = resultsDir(label);
@@ -47,7 +49,9 @@ async function runCell(mode: string, clients: number, rep: number) {
   const userId = await seedUser(pool);
   const roomId = await seedRoom(pool, userId);
   const tokens = Array.from({ length: clients }, () => tokenFor(userId));
-  const backend = await startBackend('ws', WS_PORT, `throughput-${mode.replace(':', '')}-c${clients}-r${rep}`);
+  const proxy = dbDelayMs > 0 ? await startDbProxy(() => dbDelayMs) : null;
+  const backend = await startBackend('ws', WS_PORT, `throughput-${mode.replace(':', '')}-c${clients}-r${rep}`,
+    proxy ? { databaseUrl: proxy.url } : {});
 
   const [modeName, rateText] = mode.split(':');
   const totalRate = Number(rateText ?? 0);
@@ -115,6 +119,7 @@ async function runCell(mode: string, clients: number, rep: number) {
   const logText = fs.readFileSync(backend.logPath, 'utf8');
   const exitBeforeStop = backend.exitInfo();
   await backend.stop();
+  proxy?.close();
 
   const totals = perClient.reduce((sum, c) => ({
     sent: sum.sent + c.sent,
@@ -124,7 +129,7 @@ async function runCell(mode: string, clients: number, rep: number) {
   }), { sent: 0, acked: 0, errors: 0, unacked: 0 });
 
   const record = {
-    mode, clients, rep, label,
+    mode, clients, rep, label, dbDelayMs,
     env: environmentInfo(),
     postgres: await postgresSettings(pool),
     window: { warmupMs, durationMs },
