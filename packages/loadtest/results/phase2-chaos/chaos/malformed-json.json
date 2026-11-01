@@ -1,0 +1,221 @@
+{
+  "case": "malformed-json",
+  "pass": false,
+  "env": {
+    "gitSha": "edd57411bf10e69cbe8064fd0ad67670c54bee3c",
+    "serverSourceDirty": false,
+    "cpu": "Apple M1 Pro",
+    "cores": 10,
+    "memGb": 16,
+    "platform": "darwin 27.0.0",
+    "node": "v24.14.1"
+  },
+  "checks": [
+    {
+      "name": "server stays up",
+      "pass": true,
+      "detail": {
+        "exit": null,
+        "log": "        at PrismaPgAdapter.performIO (/Users/sunny/Projects/graphite-ws-hardening/apps/ws-backend/dist/index.js:15371:12)\n        at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n        at async PrismaPgAdapter.queryRaw (/Users/sunny/Projects/graphite-ws-hardening/apps/ws-backend/dist/index.js:15302:30)\n        at async e.interpretNode (/Users/sunny/Projects/graphite-ws-hardening/apps/ws-backend/dist/index.js:6129:50)\n        at async e.run (/Users/sunny/Projects/graphite-ws-hardening/apps/ws-backend/dist/index.js:6081:28)\n        at async e.execute (/Users/sunny/Projects/graphite-ws-hardening/apps/ws-backend/dist/index.js:7124:16)\n        at async jt.request (/Users/sunny/Projects/graphite-ws-hardening/apps/ws-backend/dist/index.js:7667:19)\n        at async Object.singleLoader (/Users/sunny/Projects/graphite-ws-hardening/apps/ws-backend/dist/index.js:8067:83)\n        at async zr.request (/Users/sunny/Projects/graphite-ws-hardening/apps/ws-backend/dist/index.js:8081:18) {\n      cause: [Object]\n    }\n  },\n  clientVersion: '7.8.0'\n}\n"
+      }
+    },
+    {
+      "name": "all frames were exercised",
+      "pass": true,
+      "detail": {
+        "reached": 18
+      }
+    },
+    {
+      "name": "connection recovers after every frame",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "failed ops do not burn seq numbers",
+      "pass": true,
+      "detail": {
+        "rows": 18,
+        "currentSeq": 18,
+        "maxSeq": 18
+      }
+    },
+    {
+      "name": "invalid frames get an error reply",
+      "pass": false,
+      "detail": [
+        "not json",
+        "truncated json",
+        "empty frame",
+        "json null",
+        "json array",
+        "json number",
+        "unknown type",
+        "op with no fields",
+        "string roomId",
+        "float roomId",
+        "bad opType",
+        "bad payload",
+        "binary frame",
+        "deep nesting"
+      ]
+    }
+  ],
+  "facts": {
+    "outcomes": [
+      {
+        "name": "not json",
+        "replies": [],
+        "recovered": true,
+        "open": true,
+        "closeCode": null,
+        "logBytesAdded": 0
+      },
+      {
+        "name": "truncated json",
+        "replies": [],
+        "recovered": true,
+        "open": true,
+        "closeCode": null,
+        "logBytesAdded": 0
+      },
+      {
+        "name": "empty frame",
+        "replies": [],
+        "recovered": true,
+        "open": true,
+        "closeCode": null,
+        "logBytesAdded": 0
+      },
+      {
+        "name": "json null",
+        "replies": [],
+        "recovered": true,
+        "open": true,
+        "closeCode": null,
+        "logBytesAdded": 101
+      },
+      {
+        "name": "json array",
+        "replies": [],
+        "recovered": true,
+        "open": true,
+        "closeCode": null,
+        "logBytesAdded": 101
+      },
+      {
+        "name": "json number",
+        "replies": [],
+        "recovered": true,
+        "open": true,
+        "closeCode": null,
+        "logBytesAdded": 101
+      },
+      {
+        "name": "unknown type",
+        "replies": [],
+        "recovered": true,
+        "open": true,
+        "closeCode": null,
+        "logBytesAdded": 107
+      },
+      {
+        "name": "op with no fields",
+        "replies": [],
+        "recovered": true,
+        "open": true,
+        "closeCode": null,
+        "logBytesAdded": 208
+      },
+      {
+        "name": "string roomId",
+        "replies": [],
+        "recovered": true,
+        "open": true,
+        "closeCode": null,
+        "logBytesAdded": 109
+      },
+      {
+        "name": "float roomId",
+        "replies": [],
+        "recovered": true,
+        "open": true,
+        "closeCode": null,
+        "logBytesAdded": 109
+      },
+      {
+        "name": "bad opType",
+        "replies": [],
+        "recovered": true,
+        "open": true,
+        "closeCode": null,
+        "logBytesAdded": 110
+      },
+      {
+        "name": "bad payload",
+        "replies": [],
+        "recovered": true,
+        "open": true,
+        "closeCode": null,
+        "logBytesAdded": 116
+      },
+      {
+        "name": "proto key",
+        "replies": [
+          "room_joined"
+        ],
+        "recovered": true,
+        "open": true,
+        "closeCode": null,
+        "logBytesAdded": 0
+      },
+      {
+        "name": "binary frame",
+        "replies": [],
+        "recovered": true,
+        "open": true,
+        "closeCode": null,
+        "logBytesAdded": 108
+      },
+      {
+        "name": "deep nesting",
+        "replies": [],
+        "recovered": true,
+        "open": true,
+        "closeCode": null,
+        "logBytesAdded": 106
+      },
+      {
+        "name": "NUL in shapeId",
+        "replies": [
+          "error"
+        ],
+        "recovered": true,
+        "open": true,
+        "closeCode": null,
+        "logBytesAdded": 2353
+      },
+      {
+        "name": "NUL in text payload",
+        "replies": [
+          "error"
+        ],
+        "recovered": true,
+        "open": true,
+        "closeCode": null,
+        "logBytesAdded": 2329
+      },
+      {
+        "name": "shapeId over index limit",
+        "replies": [
+          "error"
+        ],
+        "recovered": true,
+        "open": true,
+        "closeCode": null,
+        "logBytesAdded": 2363
+      }
+    ],
+    "dbRows": 18
+  }
+}

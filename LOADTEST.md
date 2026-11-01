@@ -12,6 +12,8 @@ FULLFSYNC=0 bash run-all.sh <label>   # about 30 minutes: skips the fsync_writet
 npx tsx src/report.ts <label> <label>-fullfsync
 bash run-ab.sh                    # about 20 minutes: original and current server, interleaved
 bash run-comparisons.sh           # about 8 minutes: queue cost with slow database replies, plus overload
+BASE=<git ref> bash run-group-commit.sh   # about 75 minutes: group commit comparison, interleaved
+pnpm e2e                          # about 1 minute: rollback in the real web app, needs Google Chrome
 ```
 
 Everything runs locally: the real `ws-backend` and `http-backend` builds, plus a throwaway Postgres on `127.0.0.1:55433`. The harness refuses any non-local database URL, gives child processes a minimal explicit env, and applies migrations with `psql` instead of the Prisma CLI.
@@ -57,11 +59,11 @@ Severity is my judgment. Each row links to a chaos case or throughput table belo
 | F4 | High | Schema-invalid frames are written to the log in full. | `oversized-64mib-invalid`: 67,109,312 log bytes from one frame, RSS peak 509 MB | Small |
 | F5 | High | No backpressure for slow consumers. One stalled socket reached 175 MiB of buffer; only the 60 s heartbeat eviction ended it. | `slow-consumer`: at 3.2 MB/s, RSS peak 610 MB against 330 MB control. Healthy-client p99 barely moved (21.5 against 20.5 ms). | Small |
 | F6 | High | Broadcasts and acks can leave out of seq order, because each message is an independent async task. | 5 of 18 default-sync runs, 1–3 inversions per client, e.g. 107028 after 107030. None under `fsync_writethrough`. All clients see the same wrong order. | Medium |
-| F7 | High | Overload rejects most ops, and the web client ignores `error` frames. The local optimistic op stays on screen though it was never persisted. | `before-fullfsync` at 800/s: 76–82% rejected. `CanvasBoard.tsx` has no `error` branch. | Large: per-op transaction design, plus a web change |
+| F7 | Medium (was High; see Phase 3) | Overload rejected most ops, and the web client ignored `error` frames. **Fixed in Phase 3** up to the measured rates: group commit, and rollback with a notice. Rejections above capacity remain. | `gc-main-fullfsync` at 800/s: 80.9–82.7% rejected. `gc-new-fullfsync`: 0%. | Done, except what Open issues lists |
 | F8 | Medium | Resends are not idempotent. Each resend gets a new row and seq. | `duplicate-resend`: 2 rows for both retry and in-flight double send. The browser doesn't retry today, so this is latent. An op can still persist without an ack (3 of 2269 in `reconnect-mid-burst`). | Large: needs a client op id and a schema change |
 | F9 | Medium | `op` and `chat` are accepted from a client that never joined the room. `join_room` itself has no authorization. | `op-without-join`: persisted, acked and broadcast | Small for membership; authorization is a product decision |
 | F10 | Low | No SIGTERM handling, so deploys close clients with 1006 and drop in-flight work. | `restart-sigterm`: close codes 1006. No acked op was lost. | Small |
-| F11 | Medium (raised from Low in Phase 2) | The web catch-up flow can add the same op to its log twice, because buffered ops aren't deduped by seq. It can also miss ops, because it fetches before `join_room` has taken effect. | `reconnect-mid-burst`: 20 duplicate entries over 9 sessions, 0 missing in this baseline run. Missing ops appeared in later runs: see Phase 2. | Small, in `apps/web` |
+| F11 | Fixed in Phase 3 | The web catch-up flow could add the same op to its log twice, and could miss ops because it fetched before `join_room` took effect. | `catchup-late-join`, `catchup-slow-fetch`, `reconnect-mid-burst` | Done |
 | F12 | Low | Failures are silent: no reply to malformed frames, unknown-room joins or failed chats. | `malformed-json`, `unknown-room-*` | Small |
 
 ## What held up
@@ -1005,31 +1007,121 @@ Before F6, the next transaction could take the row lock as soon as Postgres appl
 
 The Phase 1 report said the fetch-before-join gap did not reproduce. It does. In 8 interleaved runs of `reconnect-mid-burst`, the original server had 1 run with 5 missing ops and the fixed server had none; the `after` chaos run on the fixed server had 2 missing ops. So the gap exists on both and is not caused by these fixes, and these counts are too small to compare the servers. A client that hits it keeps the gap until it reloads. The fix belongs in `apps/web`: wait until the join has taken effect before fetching, and dedupe by seq. A join-success reply from the server would make that clean, but it is a new protocol reply and was left out of this work.
 
+## Phase 3: group commit, client rollback and exact catch-up
+
+### How the web client generates ops
+
+Read from `apps/web/app/components/canvas/CanvasBoard.tsx`; these rates are estimates, not measurements. It sends one op per finished gesture, never per pointer move: `CREATE` on mouse up (a pencil stroke carries all its simplified points in one op), `UPDATE` when a drag ends, `CREATE` when text is committed, `DELETE` per key press, and one op per undo. Moving, panning and zooming send nothing.
+
+Assumed rates: 0.5–2 ops/s sustained per actively drawing user, 3–5 ops/s in bursts, and about 30 ops/s while Ctrl+Z is held, until the undo stack is empty.
+
+### Group commit
+
+The room queue now drains pending ops into one SQL statement: one `currentSeq` bump of N plus a multi-row insert, capped at 100 ops and 4 MiB of payload. Ops that arrive during a commit form the next batch, so nothing waits when the room is idle. If a batch fails, its ops are retried one at a time, so one bad op can't fail the others.
+
+`group-commit-round-trips` confirms a lone op gets one database reply, where the old transaction took several.
+
+Interleaved against `b6dcf29` (main), 3 reps, medians. Run with `BASE=b6dcf29 bash run-group-commit.sh`. Both labels record the same harness commit, `dc6ccfb`; the script swaps only the server source. Default sync cells ran for 60 s, the others for 30 s.
+
+**Default sync (`open_datasync`), closed loop:**
+
+| clients | main acked/s | new acked/s | main p95 ms | new p95 ms | new ops per commit |
+|---|---|---|---|---|---|
+| 5 | 2652 | 6901 | 2.5 | 0.9 | 2.50 |
+| 20 | 2214 | 5706 | 12.9 | 4.3 | 9.98 |
+| 50 | 1733 | 3716 | 35.5 | 15.2 | 24.69 |
+
+**Default sync, 800/s offered:**
+
+| clients | main acked/s | new acked/s | main p95 / p99 ms | new p95 / p99 ms | errors, both |
+|---|---|---|---|---|---|
+| 5 | 800 | 800 | 4.3 / 15.5 | 5.2 / 9.0 | 0 |
+| 20 | 800 | 800 | 4.8 / 10.7 | 4.5 / 7.0 | 0 |
+| 50 | 800 | 800 | 4.8 / 22.6 | 4.6 / 7.9 | 0 |
+
+**5 ms added to each database reply, closed loop:**
+
+| clients | main acked/s | new acked/s | main p95 ms | new p95 ms | new ops per commit |
+|---|---|---|---|---|---|
+| 5 | 30.2 | 256 | 185 | 24.9 | 2.48 |
+| 20 | 30.2 | 894 | 726 | 27.1 | 9.89 |
+| 50 | 28.8 | 1906 | 1883 | 27.4 | 24.32 |
+
+**5 ms added, 800/s offered:**
+
+| clients | main acked/s | new acked/s | main errors per run | new errors | main p95 ms | new p95 ms |
+|---|---|---|---|---|---|---|
+| 5 | 27.5 | 800 | 26955–26983 | 0 | 2041 | 24.4 |
+| 20 | 27.5 | 800 | 26974–26992 | 0 | 2041 | 27.1 |
+| 50 | 27.5 | 800 | 26968–26980 | 0 | 2041 | 31.1 |
+
+**`fsync_writethrough`, 20 clients:**
+
+| mode | main acked/s | new acked/s | main errors per run | new errors | main p95 ms | new p95 ms |
+|---|---|---|---|---|---|---|
+| closed | 134.5 | 1349 | 0 | 0 | 185.5 | 20.8 |
+| 800/s offered | 133.2 | 800 | 22650–23151 (80.9–82.7% of 28,000) | 0 | 2013 | 20.3 |
+
+**Correctness:** all 72 cells passed, on both servers: same arrival order on every client, content equal to the database, 0 inversions, gaps and duplicates, seqs contiguous from 1, `currentSeq` equal to the max seq, no crashes. On the new server, every op sent was acked, with no persist failures. The main server's errors at 800/s are its 2 s queue limit.
+
+How to read these:
+
+- **The limit has moved.** On the new server at 50 clients in closed loop, the server used 0.91 of a core and Postgres 0.10, so Node's single thread now limits throughput, not the database. That is why throughput falls as clients rise: each op is sent to every client in the room. The harness stayed under saturation, with a peak worker event loop utilization of 0.57.
+- **800/s with no added latency is not a capacity gain.** Main already kept up there. Tail latency improved at 800/s, but p95 at 5 clients was slightly worse, and with 3 reps these differences are small enough to be noise.
+- **Spread between reps.** With 5 ms added and 20 clients, the new server's reps were 888, 894 and 1163 acked/s. Treat ratios as rough.
+- **Earlier runs.** `after-dbdelay5` measured 40.5/s where `gc-main-delay5` measured 30.2/s at 20 clients on the same code path, in a different session. Compare within this interleaved run only.
+- **Not production.** This is an Apple M1 Pro laptop with local Postgres, running directly on macOS rather than in a container, and the 5 ms is injected by a local proxy on replies only. Production capacity is still unmeasured.
+
+The finished build (with the Phase 2 changes below) got one 30 s rep of each, as `phase2-final` and `phase2-final-nodelay`. They match the tables: 262, 968 and 1888 acked/s closed loop with 5 ms added, 6434, 5807 and 3816 with none, 800/s with 0 errors in every open-loop cell, and all correctness checks passing. One rep shows no regression; it isn't a new comparison.
+
+### F11: exact catch-up
+
+The server now adds the client to the room, reads `currentSeq`, and replies `{ type: 'room_joined', roomId, seq }`. Ops above that seq always reach the client as broadcasts, because they commit after it became a member. Ops up to it are already in the database. So the client buffers frames, fetches after the reply, refetches if the result is behind `seq`, and merges by seq.
+
+`catchup-late-join` and `catchup-slow-fetch` run the old and new flows in turn under the same conditions, 6 sessions each, with a writer running. The conditions are forced (a join frame held back 100 ms, or 150 ms added to the HTTP backend's database replies), so the counts show the mechanism and not a production rate. `FetchBeforeJoinSession` in `test/helpers.ts` copies the old flow; `BrowserSession` runs the web client's own merge code from `apps/web/lib/canvas/oplog.ts`.
+
+| case | old flow, 4 runs | new flow, 4 runs |
+|---|---|---|
+| late join: missing ops | 49, 49, 50, 49 | 0, 0, 0, 0 |
+| slow fetch: duplicate entries | 27, 26, 26, 27 | 0, 0, 0, 0 |
+
+`reconnect-mid-burst`, the F11 chaos test, passed all 4 runs with 0 missing and 0 duplicates across all sessions. The restart tests use the new flow too and pass.
+
+### F7 on the client: rollback and notice
+
+`error` frames for ops now carry `roomId`, `shapeId` and `opType`, which is additive. The web client removes the rejected op from its log, refolds the shapes, removes the undo step that op added (or puts back the step if the op was itself an undo), clears the selection if the shape is gone, and shows a small notice that doesn't block the canvas and clears itself after 4 s.
+
+`e2e/rollback.e2e.ts` (`pnpm e2e`) drives the real web app in Chrome against the local backends, using a database constraint to make inserts fail. Its 13 checks cover rejected `CREATE`, undo and drag, each restoring the canvas pixel for pixel; the notice appearing and clearing; retrying a rejected undo; the database holding only accepted ops; and a watching tab and a newly opened tab matching the author's pixels exactly. `test/oplog.test.ts` covers the log rules and `test/error-frames.test.ts` the frames.
+
+The in-progress shape preview leaves `lineCap` and `lineJoin` set to `round` on the canvas context, so a tab that has drawn a shape renders line ends a few pixels differently from one that hasn't. This was already there and is only cosmetic. The browser test sets the same values on the other tabs before comparing.
+
+### Chaos run on the finished build
+
+`phase2-chaos`: 44 of 49 tests passed on the first run, plus the browser test. One failure was a stale check in `op-without-join`, which required a member to receive no frames at all and now sees its `room_joined`. The check now looks for `op` and `chat` frames and passes. That leaves 4 known failures:
+
+| test | issue |
+|---|---|
+| `duplicate op resend is idempotent` | F8 |
+| `malformed frames leave the server and the connection usable` | F12 |
+| `unknown room: chat-unknown` | F12 |
+| `unknown room: chat-over-int4` | F12 |
+
+### Deploy order
+
+Deploy `ws-backend` first. An old web client ignores `room_joined` and the extra error fields, so it behaves as it does today. A new web client on an old server waits 3 s for a reply it won't get, then loads as it used to; it can't roll back, and an op error shows the "Couldn't connect to this canvas" notice instead.
+
 ## Open issues
 
-### F7: overload rejects most ops, and the client doesn't notice
+### F7: what's left
 
-**Status:** open, high severity. F6 changed how it fails, not whether it fails.
+**Status:** mostly fixed in Phase 3. Medium severity for what remains.
 
-**Repro:**
+Steps 1, 2 and 4 of the original design are done, and step 3 is done differently: error frames name the shape and op type instead of a client op id, which F8 would add. What remains:
 
-```sh
-cd packages/loadtest
-bash pg.sh down; PG_OPTS="-c wal_sync_method=fsync_writethrough" bash pg.sh up
-pnpm --filter ws-backend build
-npx tsx src/throughput.ts --label f7-repro --clients 20 --modes open:800 --reps 3
-```
-
-**Measured:** at 800/s offered with 20 clients, 80.1–82.4% of ops are rejected (`after-fullfsync-overload`; 75.7–80.2% before the fixes). The rate acked is 136.7–154.4/s. Failures changed from Prisma `P2028` to the queue's 2 s limit (42,848 of 42,848 logged failures in the one run inspected). Server RSS stayed under 243 MB, so the backlog is bounded. Every rejected op gets an `error` frame, but `apps/web/app/components/canvas/CanvasBoard.tsx` has no handler for it, so the user keeps seeing a shape that was never saved until they reload.
-
-**Proposed design, in order:**
-
-1. **One round trip per op.** Replace the interactive transaction with a single statement inside the queue: a CTE that increments `currentSeq` and inserts the `Operation` row. Seq stays atomic, the row lock is held only inside Postgres, and most of the F6 latency cost goes away. This is the first thing to do, and it should be measured with `--db-delay`.
-2. **Batch commits per room.** Have the queue drain up to N waiting ops into one multi-row statement and one commit, so one disk flush covers many ops. Broadcasts and acks still go out in seq order afterwards.
-3. **Make rejections usable.** Add the client op id from F8 to acks and `error` frames, so a client knows exactly which op failed.
-4. **Handle failure in the web client.** Roll back the optimistic op on `error`, or refetch the room and tell the user.
-
-Steps 1 and 2 are server-only and keep the protocol. Steps 3 and 4 need the protocol and `apps/web` changes.
+- **Above capacity, ops are still rejected.** The 2 s queue limit and the rejection path are unchanged. No run here pushed offered load past capacity on the new server: 800/s was sustained with 0 errors in every configuration.
+- **A rejected change is lost.** The client rolls it back and says so, but doesn't retry. Safe retries need F8.
+- **Ops unanswered when a socket drops are dropped without a notice.** The catch-up fetch brings back any that were saved. Any that weren't simply disappear. `reconnect-mid-burst` measured 0 of these in all 4 runs, and 1–3 ops per run that were saved but never acked.
+- **Frames that fail validation get no reply (F12),** so an optimistic op in such a frame stays on screen until reload.
 
 ### F8: resent ops create duplicates
 
@@ -1053,7 +1145,7 @@ LOADTEST_LABEL=f8-repro node --import tsx --test test/duplicate.test.ts
 3. **Server:** inside the same statement or transaction as the seq increment, look for the existing row first. A resend gets a repeat ack with the original seq and is not broadcast again. It must not consume a seq, or the log gets gaps.
 4. **Client:** generate the id in `emitOp`, keep unacked ops, and resend them after reconnect and catch-up.
 
-This pairs with step 1 of F7, so the two should be designed together.
+The client op id would also let `error` frames name an op exactly, in place of the shape and op type they carry now.
 
 ## Raw results: Phase 2
 
@@ -2088,3 +2180,372 @@ Convergence (arrival order compares all clients; inversions are seqs arriving af
 | open:800 | 5 | 3 | true | true | 0/5 | 0 | 0 | 0 | true | true | 28000 | 0 | false |
 | open:800 | 50 | 3 | true | true | 0/50 | 0 | 0 | 0 | true | true | 28000 | 0 | false |
 
+## Raw results: Phase 3
+
+### Throughput: `gc-main`
+
+Commit `dc6ccfbd8b413bd4e74834491516184017445724`, Apple M1 Pro, 10 cores, 16 GB, darwin 27.0.0, Node v24.14.1. Postgres 17.10 (Homebrew): fsync=on, synchronous_commit=on, wal_sync_method=open_datasync. 60s measured after 5s warm-up, fresh server and room per run.
+
+| mode | clients | rep | acked/s | worst 1s | p50 ms | p95 ms | p99 ms | max ms | errors | unacked | ops per commit | server CPU | PG CPU | harness ELU |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| closed | 5 | 1 | 2687.8 | 2297 | 1.8 | 2.2 | 3.7 | 17.6 | 0 | 0 | 1.00 | 0.64 | 0.36 | 0.10 |
+| closed | 20 | 1 | 2245.5 | 1924 | 8.4 | 11.1 | 16.2 | 52.9 | 0 | 0 | 1.00 | 0.67 | 0.32 | 0.17 |
+| closed | 50 | 1 | 1733.0 | 1456 | 27.7 | 35.6 | 47.0 | 72.5 | 0 | 0 | 1.00 | 0.73 | 0.26 | 0.30 |
+| open:800 | 5 | 1 | 800.0 | 700 | 2.5 | 4.3 | 16.6 | 232.6 | 0 | 0 | 1.00 | 0.27 | 0.16 | 0.05 |
+| open:800 | 20 | 1 | 800.0 | 729 | 2.8 | 6.3 | 51.7 | 130.9 | 0 | 0 | 1.00 | 0.33 | 0.17 | 0.09 |
+| open:800 | 50 | 1 | 800.0 | 752 | 2.6 | 16.3 | 79.0 | 162.5 | 0 | 0 | 1.00 | 0.39 | 0.15 | 0.12 |
+| closed | 5 | 2 | 2272.6 | 1663 | 2.0 | 3.1 | 4.7 | 54.0 | 0 | 0 | 1.00 | 0.63 | 0.36 | 0.11 |
+| closed | 20 | 2 | 1972.1 | 1327 | 9.6 | 12.9 | 19.0 | 108.0 | 0 | 0 | 1.00 | 0.66 | 0.33 | 0.17 |
+| closed | 50 | 2 | 1714.3 | 1100 | 27.8 | 35.5 | 49.3 | 118.5 | 0 | 0 | 1.00 | 0.73 | 0.27 | 0.24 |
+| open:800 | 5 | 2 | 800.0 | 796 | 2.5 | 5.1 | 15.5 | 85.3 | 0 | 0 | 1.00 | 0.31 | 0.19 | 0.06 |
+| open:800 | 20 | 2 | 800.0 | 799 | 2.7 | 4.8 | 10.7 | 84.7 | 0 | 0 | 1.00 | 0.33 | 0.16 | 0.07 |
+| open:800 | 50 | 2 | 800.0 | 799 | 2.6 | 4.5 | 22.6 | 89.6 | 0 | 0 | 1.00 | 0.37 | 0.14 | 0.11 |
+| closed | 5 | 3 | 2652.2 | 2040 | 1.8 | 2.5 | 3.7 | 29.3 | 0 | 0 | 1.00 | 0.64 | 0.36 | 0.12 |
+| closed | 20 | 3 | 2213.8 | 1040 | 8.3 | 12.9 | 19.6 | 88.8 | 0 | 0 | 1.00 | 0.67 | 0.32 | 0.16 |
+| closed | 50 | 3 | 1781.7 | 1322 | 26.7 | 34.5 | 51.9 | 129.3 | 0 | 0 | 1.00 | 0.73 | 0.26 | 0.25 |
+| open:800 | 5 | 3 | 800.0 | 794 | 2.4 | 4.3 | 5.9 | 17.8 | 0 | 0 | 1.00 | 0.31 | 0.18 | 0.05 |
+| open:800 | 20 | 3 | 800.0 | 792 | 2.5 | 4.5 | 6.6 | 23.1 | 0 | 0 | 1.00 | 0.32 | 0.16 | 0.07 |
+| open:800 | 50 | 3 | 800.0 | 789 | 2.6 | 4.8 | 10.4 | 43.1 | 0 | 0 | 1.00 | 0.37 | 0.14 | 0.11 |
+
+Median across reps:
+
+| mode | clients | reps | acked/s | worst 1s | p50 ms | p95 ms | p99 ms |
+|---|---|---|---|---|---|---|---|
+| closed | 5 | 3 | 2652.2 | 2040 | 1.8 | 2.5 | 3.7 |
+| closed | 20 | 3 | 2213.8 | 1327 | 8.4 | 12.9 | 19.0 |
+| closed | 50 | 3 | 1733.0 | 1322 | 27.7 | 35.5 | 49.3 |
+| open:800 | 5 | 3 | 800.0 | 794 | 2.5 | 4.3 | 15.5 |
+| open:800 | 20 | 3 | 800.0 | 792 | 2.7 | 4.8 | 10.7 |
+| open:800 | 50 | 3 | 800.0 | 789 | 2.6 | 4.8 | 22.6 |
+
+Convergence (arrival order compares all clients; inversions are seqs arriving after a higher seq):
+
+| mode | clients | rep | same arrival order | content = DB | clients with inversions | max inversions | gaps | dups | DB contiguous | currentSeq = max | DB rows | persist failures | crashed |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| closed | 5 | 1 | true | true | 0/5 | 0 | 0 | 0 | true | true | 173502 | 0 | false |
+| closed | 20 | 1 | true | true | 0/20 | 0 | 0 | 0 | true | true | 145150 | 0 | false |
+| closed | 50 | 1 | true | true | 0/50 | 0 | 0 | 0 | true | true | 112210 | 0 | false |
+| open:800 | 5 | 1 | true | true | 0/5 | 0 | 0 | 0 | true | true | 52000 | 0 | false |
+| open:800 | 20 | 1 | true | true | 0/20 | 0 | 0 | 0 | true | true | 52000 | 0 | false |
+| open:800 | 50 | 1 | true | true | 0/50 | 0 | 0 | 0 | true | true | 52000 | 0 | false |
+| closed | 5 | 2 | true | true | 0/5 | 0 | 0 | 0 | true | true | 147101 | 0 | false |
+| closed | 20 | 2 | true | true | 0/20 | 0 | 0 | 0 | true | true | 127478 | 0 | false |
+| closed | 50 | 2 | true | true | 0/50 | 0 | 0 | 0 | true | true | 111053 | 0 | false |
+| open:800 | 5 | 2 | true | true | 0/5 | 0 | 0 | 0 | true | true | 52000 | 0 | false |
+| open:800 | 20 | 2 | true | true | 0/20 | 0 | 0 | 0 | true | true | 52000 | 0 | false |
+| open:800 | 50 | 2 | true | true | 0/50 | 0 | 0 | 0 | true | true | 52000 | 0 | false |
+| closed | 5 | 3 | true | true | 0/5 | 0 | 0 | 0 | true | true | 167651 | 0 | false |
+| closed | 20 | 3 | true | true | 0/20 | 0 | 0 | 0 | true | true | 143200 | 0 | false |
+| closed | 50 | 3 | true | true | 0/50 | 0 | 0 | 0 | true | true | 114885 | 0 | false |
+| open:800 | 5 | 3 | true | true | 0/5 | 0 | 0 | 0 | true | true | 52000 | 0 | false |
+| open:800 | 20 | 3 | true | true | 0/20 | 0 | 0 | 0 | true | true | 52000 | 0 | false |
+| open:800 | 50 | 3 | true | true | 0/50 | 0 | 0 | 0 | true | true | 52000 | 0 | false |
+
+### Throughput: `gc-new`
+
+Commit `dc6ccfbd8b413bd4e74834491516184017445724`, Apple M1 Pro, 10 cores, 16 GB, darwin 27.0.0, Node v24.14.1. Postgres 17.10 (Homebrew): fsync=on, synchronous_commit=on, wal_sync_method=open_datasync. 60s measured after 5s warm-up, fresh server and room per run.
+
+| mode | clients | rep | acked/s | worst 1s | p50 ms | p95 ms | p99 ms | max ms | errors | unacked | ops per commit | server CPU | PG CPU | harness ELU |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| closed | 5 | 1 | 6023.8 | 3816 | 0.7 | 1.2 | 2.1 | 58.7 | 0 | 0 | 2.50 | 0.38 | 0.48 | 0.22 |
+| closed | 20 | 1 | 5706.0 | 3666 | 3.3 | 4.8 | 8.1 | 77.7 | 0 | 0 | 9.97 | 0.61 | 0.24 | 0.40 |
+| closed | 50 | 1 | 3260.6 | 1603 | 14.6 | 19.5 | 38.1 | 179.1 | 0 | 0 | 24.65 | 0.86 | 0.11 | 0.57 |
+| open:800 | 5 | 1 | 800.0 | 710 | 2.1 | 5.2 | 16.7 | 221.3 | 0 | 0 | 1.17 | 0.15 | 0.20 | 0.09 |
+| open:800 | 20 | 1 | 800.0 | 786 | 2.1 | 4.0 | 9.0 | 62.0 | 0 | 0 | 1.32 | 0.17 | 0.16 | 0.09 |
+| open:800 | 50 | 1 | 800.0 | 796 | 2.5 | 4.6 | 7.9 | 79.4 | 0 | 0 | 1.21 | 0.28 | 0.18 | 0.14 |
+| closed | 5 | 2 | 7074.1 | 5927 | 0.7 | 0.9 | 1.1 | 12.8 | 0 | 0 | 2.50 | 0.40 | 0.48 | 0.24 |
+| closed | 20 | 2 | 5451.6 | 4254 | 3.9 | 4.3 | 6.2 | 24.5 | 0 | 0 | 9.98 | 0.51 | 0.18 | 0.38 |
+| closed | 50 | 2 | 3715.8 | 3113 | 13.6 | 15.2 | 17.6 | 48.1 | 0 | 0 | 24.73 | 0.91 | 0.10 | 0.54 |
+| open:800 | 5 | 2 | 800.0 | 796 | 2.5 | 4.9 | 7.5 | 23.6 | 0 | 0 | 1.14 | 0.22 | 0.29 | 0.09 |
+| open:800 | 20 | 2 | 800.0 | 792 | 2.8 | 4.7 | 7.0 | 26.9 | 0 | 0 | 1.26 | 0.26 | 0.24 | 0.11 |
+| open:800 | 50 | 2 | 800.0 | 780 | 2.6 | 4.9 | 12.5 | 72.8 | 0 | 0 | 1.13 | 0.30 | 0.18 | 0.20 |
+| closed | 5 | 3 | 6900.8 | 5761 | 0.7 | 0.9 | 1.2 | 28.4 | 0 | 0 | 2.50 | 0.39 | 0.47 | 0.24 |
+| closed | 20 | 3 | 6007.3 | 4279 | 3.2 | 4.3 | 6.1 | 36.1 | 0 | 0 | 9.98 | 0.59 | 0.21 | 0.38 |
+| closed | 50 | 3 | 3831.3 | 3348 | 13.2 | 14.8 | 16.8 | 61.1 | 0 | 0 | 24.69 | 0.91 | 0.10 | 0.51 |
+| open:800 | 5 | 3 | 800.0 | 683 | 2.4 | 5.2 | 9.0 | 250.1 | 0 | 0 | 1.14 | 0.22 | 0.29 | 0.09 |
+| open:800 | 20 | 3 | 800.0 | 774 | 2.7 | 4.5 | 6.7 | 37.3 | 0 | 0 | 1.16 | 0.27 | 0.24 | 0.13 |
+| open:800 | 50 | 3 | 800.0 | 798 | 2.7 | 4.4 | 6.0 | 19.7 | 0 | 0 | 1.12 | 0.29 | 0.17 | 0.21 |
+
+Median across reps:
+
+| mode | clients | reps | acked/s | worst 1s | p50 ms | p95 ms | p99 ms |
+|---|---|---|---|---|---|---|---|
+| closed | 5 | 3 | 6900.8 | 5761 | 0.7 | 0.9 | 1.2 |
+| closed | 20 | 3 | 5706.0 | 4254 | 3.3 | 4.3 | 6.2 |
+| closed | 50 | 3 | 3715.8 | 3113 | 13.6 | 15.2 | 17.6 |
+| open:800 | 5 | 3 | 800.0 | 710 | 2.4 | 5.2 | 9.0 |
+| open:800 | 20 | 3 | 800.0 | 786 | 2.7 | 4.5 | 7.0 |
+| open:800 | 50 | 3 | 800.0 | 796 | 2.6 | 4.6 | 7.9 |
+
+Convergence (arrival order compares all clients; inversions are seqs arriving after a higher seq):
+
+| mode | clients | rep | same arrival order | content = DB | clients with inversions | max inversions | gaps | dups | DB contiguous | currentSeq = max | DB rows | persist failures | crashed |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| closed | 5 | 1 | true | true | 0/5 | 0 | 0 | 0 | true | true | 392005 | 0 | false |
+| closed | 20 | 1 | true | true | 0/20 | 0 | 0 | 0 | true | true | 367920 | 0 | false |
+| closed | 50 | 1 | true | true | 0/50 | 0 | 0 | 0 | true | true | 213434 | 0 | false |
+| open:800 | 5 | 1 | true | true | 0/5 | 0 | 0 | 0 | true | true | 52000 | 0 | false |
+| open:800 | 20 | 1 | true | true | 0/20 | 0 | 0 | 0 | true | true | 52000 | 0 | false |
+| open:800 | 50 | 1 | true | true | 0/50 | 0 | 0 | 0 | true | true | 52000 | 0 | false |
+| closed | 5 | 2 | true | true | 0/5 | 0 | 0 | 0 | true | true | 459635 | 0 | false |
+| closed | 20 | 2 | true | true | 0/20 | 0 | 0 | 0 | true | true | 351854 | 0 | false |
+| closed | 50 | 2 | true | true | 0/50 | 0 | 0 | 0 | true | true | 241645 | 0 | false |
+| open:800 | 5 | 2 | true | true | 0/5 | 0 | 0 | 0 | true | true | 52000 | 0 | false |
+| open:800 | 20 | 2 | true | true | 0/20 | 0 | 0 | 0 | true | true | 52000 | 0 | false |
+| open:800 | 50 | 2 | true | true | 0/50 | 0 | 0 | 0 | true | true | 52000 | 0 | false |
+| closed | 5 | 3 | true | true | 0/5 | 0 | 0 | 0 | true | true | 447074 | 0 | false |
+| closed | 20 | 3 | true | true | 0/20 | 0 | 0 | 0 | true | true | 385734 | 0 | false |
+| closed | 50 | 3 | true | true | 0/50 | 0 | 0 | 0 | true | true | 248323 | 0 | false |
+| open:800 | 5 | 3 | true | true | 0/5 | 0 | 0 | 0 | true | true | 52000 | 0 | false |
+| open:800 | 20 | 3 | true | true | 0/20 | 0 | 0 | 0 | true | true | 52000 | 0 | false |
+| open:800 | 50 | 3 | true | true | 0/50 | 0 | 0 | 0 | true | true | 52000 | 0 | false |
+
+### Throughput: `gc-main-delay5`
+
+Commit `dc6ccfbd8b413bd4e74834491516184017445724`, Apple M1 Pro, 10 cores, 16 GB, darwin 27.0.0, Node v24.14.1. Postgres 17.10 (Homebrew): fsync=on, synchronous_commit=on, wal_sync_method=open_datasync. 30s measured after 5s warm-up, fresh server and room per run.
+
+| mode | clients | rep | acked/s | worst 1s | p50 ms | p95 ms | p99 ms | max ms | errors | unacked | ops per commit | server CPU | PG CPU | harness ELU |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| closed | 5 | 1 | 31.0 | 22 | 161.9 | 181.3 | 197.0 | 412.1 | 0 | 0 | 0.99 | 0.13 | 0.05 | 0.03 |
+| closed | 20 | 1 | 29.6 | 8 | 681.0 | 726.2 | 745.3 | 773.4 | 0 | 0 | 0.96 | 0.14 | 0.05 | 0.06 |
+| closed | 50 | 1 | 28.0 | 0 | 1787.9 | 1893.8 | 1917.2 | 1928.9 | 0 | 0 | 0.94 | 0.17 | 0.05 | 0.10 |
+| open:800 | 5 | 1 | 27.2 | 0 | 2029.1 | 2042.6 | 2051.6 | 2069.1 | 26983 | 26983 | 0.98 | 0.34 | 0.02 | 0.07 |
+| open:800 | 20 | 1 | 27.6 | 0 | 2029.3 | 2040.9 | 2048.9 | 2071.5 | 26974 | 26974 | 0.96 | 0.34 | 0.03 | 0.07 |
+| open:800 | 50 | 1 | 27.7 | 0 | 2029.6 | 2042.3 | 2051.7 | 2081.7 | 26968 | 26968 | 0.93 | 0.33 | 0.02 | 0.07 |
+| closed | 5 | 2 | 30.2 | 24 | 168.3 | 184.8 | 196.6 | 217.6 | 0 | 0 | 0.99 | 0.14 | 0.06 | 0.03 |
+| closed | 20 | 2 | 30.2 | 10 | 667.5 | 735.2 | 758.1 | 766.1 | 0 | 0 | 0.97 | 0.15 | 0.05 | 0.06 |
+| closed | 50 | 2 | 29.6 | 0 | 1670.3 | 1882.6 | 1932.8 | 1944.3 | 0 | 0 | 0.94 | 0.15 | 0.05 | 0.08 |
+| open:800 | 5 | 2 | 27.8 | 0 | 2029.4 | 2039.2 | 2047.2 | 2081.8 | 26955 | 26955 | 0.98 | 0.32 | 0.03 | 0.06 |
+| open:800 | 20 | 2 | 27.0 | 0 | 2029.1 | 2042.0 | 2048.8 | 2070.4 | 26992 | 26992 | 0.96 | 0.34 | 0.03 | 0.06 |
+| open:800 | 50 | 2 | 27.3 | 0 | 2029.8 | 2041.0 | 2050.8 | 2177.9 | 26980 | 26980 | 0.93 | 0.34 | 0.02 | 0.07 |
+| closed | 5 | 3 | 30.1 | 24 | 167.1 | 186.0 | 197.4 | 220.6 | 0 | 0 | 0.98 | 0.15 | 0.06 | 0.03 |
+| closed | 20 | 3 | 30.3 | 8 | 664.5 | 709.6 | 783.7 | 810.2 | 0 | 0 | 0.97 | 0.14 | 0.05 | 0.06 |
+| closed | 50 | 3 | 28.8 | 0 | 1736.2 | 1846.9 | 1875.0 | 1896.1 | 0 | 0 | 0.94 | 0.16 | 0.05 | 0.09 |
+| open:800 | 5 | 3 | 27.5 | 0 | 2029.1 | 2040.6 | 2048.3 | 2063.6 | 26975 | 26975 | 0.98 | 0.35 | 0.02 | 0.06 |
+| open:800 | 20 | 3 | 27.5 | 0 | 2029.3 | 2039.9 | 2047.1 | 2069.0 | 26983 | 26983 | 0.96 | 0.35 | 0.02 | 0.07 |
+| open:800 | 50 | 3 | 27.5 | 0 | 2029.7 | 2040.1 | 2046.0 | 2076.1 | 26980 | 26980 | 0.93 | 0.35 | 0.02 | 0.08 |
+
+Median across reps:
+
+| mode | clients | reps | acked/s | worst 1s | p50 ms | p95 ms | p99 ms |
+|---|---|---|---|---|---|---|---|
+| closed | 5 | 3 | 30.2 | 24 | 167.1 | 184.8 | 197.0 |
+| closed | 20 | 3 | 30.2 | 8 | 667.5 | 726.2 | 758.1 |
+| closed | 50 | 3 | 28.8 | 0 | 1736.2 | 1882.6 | 1917.2 |
+| open:800 | 5 | 3 | 27.5 | 0 | 2029.1 | 2040.6 | 2048.3 |
+| open:800 | 20 | 3 | 27.5 | 0 | 2029.3 | 2040.9 | 2048.8 |
+| open:800 | 50 | 3 | 27.5 | 0 | 2029.7 | 2041.0 | 2050.8 |
+
+Convergence (arrival order compares all clients; inversions are seqs arriving after a higher seq):
+
+| mode | clients | rep | same arrival order | content = DB | clients with inversions | max inversions | gaps | dups | DB contiguous | currentSeq = max | DB rows | persist failures | crashed |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| closed | 5 | 1 | true | true | 0/5 | 0 | 0 | 0 | true | true | 1083 | 0 | false |
+| closed | 20 | 1 | true | true | 0/20 | 0 | 0 | 0 | true | true | 1046 | 0 | false |
+| closed | 50 | 1 | true | true | 0/50 | 0 | 0 | 0 | true | true | 1031 | 0 | false |
+| open:800 | 5 | 1 | true | true | 0/5 | 0 | 0 | 0 | true | true | 1017 | 26983 | false |
+| open:800 | 20 | 1 | true | true | 0/20 | 0 | 0 | 0 | true | true | 1026 | 26974 | false |
+| open:800 | 50 | 1 | true | true | 0/50 | 0 | 0 | 0 | true | true | 1032 | 26968 | false |
+| closed | 5 | 2 | true | true | 0/5 | 0 | 0 | 0 | true | true | 1058 | 0 | false |
+| closed | 20 | 2 | true | true | 0/20 | 0 | 0 | 0 | true | true | 1065 | 0 | false |
+| closed | 50 | 2 | true | true | 0/50 | 0 | 0 | 0 | true | true | 1075 | 0 | false |
+| open:800 | 5 | 2 | true | true | 0/5 | 0 | 0 | 0 | true | true | 1045 | 26955 | false |
+| open:800 | 20 | 2 | true | true | 0/20 | 0 | 0 | 0 | true | true | 1008 | 26992 | false |
+| open:800 | 50 | 2 | true | true | 0/50 | 0 | 0 | 0 | true | true | 1020 | 26980 | false |
+| closed | 5 | 3 | true | true | 0/5 | 0 | 0 | 0 | true | true | 1058 | 0 | false |
+| closed | 20 | 3 | true | true | 0/20 | 0 | 0 | 0 | true | true | 1079 | 0 | false |
+| closed | 50 | 3 | true | true | 0/50 | 0 | 0 | 0 | true | true | 1049 | 0 | false |
+| open:800 | 5 | 3 | true | true | 0/5 | 0 | 0 | 0 | true | true | 1025 | 26975 | false |
+| open:800 | 20 | 3 | true | true | 0/20 | 0 | 0 | 0 | true | true | 1017 | 26983 | false |
+| open:800 | 50 | 3 | true | true | 0/50 | 0 | 0 | 0 | true | true | 1020 | 26980 | false |
+
+### Throughput: `gc-new-delay5`
+
+Commit `dc6ccfbd8b413bd4e74834491516184017445724`, Apple M1 Pro, 10 cores, 16 GB, darwin 27.0.0, Node v24.14.1. Postgres 17.10 (Homebrew): fsync=on, synchronous_commit=on, wal_sync_method=open_datasync. 30s measured after 5s warm-up, fresh server and room per run.
+
+| mode | clients | rep | acked/s | worst 1s | p50 ms | p95 ms | p99 ms | max ms | errors | unacked | ops per commit | server CPU | PG CPU | harness ELU |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| closed | 5 | 1 | 259.7 | 230 | 19.6 | 24.9 | 30.2 | 37.8 | 0 | 0 | 2.49 | 0.14 | 0.14 | 0.10 |
+| closed | 20 | 1 | 888.0 | 801 | 22.6 | 27.1 | 30.3 | 50.0 | 0 | 0 | 9.87 | 0.26 | 0.09 | 0.18 |
+| closed | 50 | 1 | 1913.3 | 1816 | 26.2 | 27.3 | 31.6 | 51.3 | 0 | 0 | 24.35 | 0.48 | 0.05 | 0.30 |
+| open:800 | 5 | 1 | 800.0 | 788 | 16.4 | 24.2 | 28.7 | 51.3 | 0 | 0 | 7.46 | 0.19 | 0.16 | 0.18 |
+| open:800 | 20 | 1 | 800.0 | 784 | 19.9 | 27.1 | 30.6 | 55.5 | 0 | 0 | 8.44 | 0.26 | 0.10 | 0.19 |
+| open:800 | 50 | 1 | 800.0 | 785 | 24.2 | 31.8 | 35.6 | 52.0 | 0 | 0 | 10.05 | 0.34 | 0.06 | 0.21 |
+| closed | 5 | 2 | 256.4 | 231 | 20.0 | 23.9 | 29.6 | 61.4 | 0 | 0 | 2.48 | 0.15 | 0.15 | 0.10 |
+| closed | 20 | 2 | 893.9 | 835 | 22.5 | 27.3 | 30.0 | 37.0 | 0 | 0 | 9.89 | 0.26 | 0.09 | 0.18 |
+| closed | 50 | 2 | 1906.2 | 1806 | 26.4 | 27.4 | 28.6 | 44.4 | 0 | 0 | 24.32 | 0.48 | 0.05 | 0.30 |
+| open:800 | 5 | 2 | 800.0 | 790 | 16.9 | 24.4 | 28.0 | 44.6 | 0 | 0 | 7.58 | 0.20 | 0.17 | 0.15 |
+| open:800 | 20 | 2 | 800.0 | 793 | 19.4 | 28.3 | 220.5 | 432.6 | 0 | 0 | 8.35 | 0.25 | 0.10 | 0.19 |
+| open:800 | 50 | 2 | 800.0 | 785 | 23.5 | 31.1 | 35.5 | 54.5 | 0 | 0 | 9.82 | 0.33 | 0.07 | 0.21 |
+| closed | 5 | 3 | 252.3 | 221 | 19.9 | 25.1 | 30.6 | 49.0 | 0 | 0 | 2.48 | 0.15 | 0.15 | 0.11 |
+| closed | 20 | 3 | 1162.7 | 1040 | 17.0 | 18.3 | 20.0 | 48.2 | 0 | 0 | 9.91 | 0.16 | 0.06 | 0.12 |
+| closed | 50 | 3 | 1840.9 | 1369 | 26.0 | 35.9 | 50.9 | 137.9 | 0 | 0 | 24.32 | 0.50 | 0.06 | 0.30 |
+| open:800 | 5 | 3 | 800.0 | 785 | 16.4 | 25.5 | 35.8 | 93.3 | 0 | 0 | 7.38 | 0.19 | 0.14 | 0.20 |
+| open:800 | 20 | 3 | 800.0 | 785 | 18.7 | 25.7 | 29.8 | 55.6 | 0 | 0 | 7.93 | 0.25 | 0.10 | 0.20 |
+| open:800 | 50 | 3 | 800.0 | 785 | 20.7 | 28.7 | 45.9 | 102.9 | 0 | 0 | 8.79 | 0.30 | 0.06 | 0.20 |
+
+Median across reps:
+
+| mode | clients | reps | acked/s | worst 1s | p50 ms | p95 ms | p99 ms |
+|---|---|---|---|---|---|---|---|
+| closed | 5 | 3 | 256.4 | 230 | 19.9 | 24.9 | 30.2 |
+| closed | 20 | 3 | 893.9 | 835 | 22.5 | 27.1 | 30.0 |
+| closed | 50 | 3 | 1906.2 | 1806 | 26.2 | 27.4 | 31.6 |
+| open:800 | 5 | 3 | 800.0 | 788 | 16.4 | 24.4 | 28.7 |
+| open:800 | 20 | 3 | 800.0 | 785 | 19.4 | 27.1 | 30.6 |
+| open:800 | 50 | 3 | 800.0 | 785 | 23.5 | 31.1 | 35.6 |
+
+Convergence (arrival order compares all clients; inversions are seqs arriving after a higher seq):
+
+| mode | clients | rep | same arrival order | content = DB | clients with inversions | max inversions | gaps | dups | DB contiguous | currentSeq = max | DB rows | persist failures | crashed |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| closed | 5 | 1 | true | true | 0/5 | 0 | 0 | 0 | true | true | 9011 | 0 | false |
+| closed | 20 | 1 | true | true | 0/20 | 0 | 0 | 0 | true | true | 31060 | 0 | false |
+| closed | 50 | 1 | true | true | 0/50 | 0 | 0 | 0 | true | true | 67000 | 0 | false |
+| open:800 | 5 | 1 | true | true | 0/5 | 0 | 0 | 0 | true | true | 28000 | 0 | false |
+| open:800 | 20 | 1 | true | true | 0/20 | 0 | 0 | 0 | true | true | 28000 | 0 | false |
+| open:800 | 50 | 1 | true | true | 0/50 | 0 | 0 | 0 | true | true | 28000 | 0 | false |
+| closed | 5 | 2 | true | true | 0/5 | 0 | 0 | 0 | true | true | 9011 | 0 | false |
+| closed | 20 | 2 | true | true | 0/20 | 0 | 0 | 0 | true | true | 31156 | 0 | false |
+| closed | 50 | 2 | true | true | 0/50 | 0 | 0 | 0 | true | true | 66632 | 0 | false |
+| open:800 | 5 | 2 | true | true | 0/5 | 0 | 0 | 0 | true | true | 28000 | 0 | false |
+| open:800 | 20 | 2 | true | true | 0/20 | 0 | 0 | 0 | true | true | 28000 | 0 | false |
+| open:800 | 50 | 2 | true | true | 0/50 | 0 | 0 | 0 | true | true | 28000 | 0 | false |
+| closed | 5 | 3 | true | true | 0/5 | 0 | 0 | 0 | true | true | 8800 | 0 | false |
+| closed | 20 | 3 | true | true | 0/20 | 0 | 0 | 0 | true | true | 39821 | 0 | false |
+| closed | 50 | 3 | true | true | 0/50 | 0 | 0 | 0 | true | true | 65079 | 0 | false |
+| open:800 | 5 | 3 | true | true | 0/5 | 0 | 0 | 0 | true | true | 28000 | 0 | false |
+| open:800 | 20 | 3 | true | true | 0/20 | 0 | 0 | 0 | true | true | 28000 | 0 | false |
+| open:800 | 50 | 3 | true | true | 0/50 | 0 | 0 | 0 | true | true | 28000 | 0 | false |
+
+### Throughput: `gc-main-fullfsync`
+
+Commit `dc6ccfbd8b413bd4e74834491516184017445724`, Apple M1 Pro, 10 cores, 16 GB, darwin 27.0.0, Node v24.14.1. Postgres 17.10 (Homebrew): fsync=on, synchronous_commit=on, wal_sync_method=fsync_writethrough. 30s measured after 5s warm-up, fresh server and room per run.
+
+| mode | clients | rep | acked/s | worst 1s | p50 ms | p95 ms | p99 ms | max ms | errors | unacked | ops per commit | server CPU | PG CPU | harness ELU |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| closed | 20 | 1 | 134.5 | 115 | 151.9 | 185.5 | 203.0 | 225.1 | 0 | 0 | 0.99 | 0.26 | 0.13 | 0.11 |
+| open:800 | 20 | 1 | 144.0 | 0 | 2006.4 | 2011.1 | 2015.3 | 2023.8 | 22650 | 22650 | 0.99 | 0.39 | 0.08 | 0.08 |
+| closed | 20 | 2 | 129.8 | 110 | 158.8 | 190.1 | 206.2 | 244.2 | 0 | 0 | 0.99 | 0.25 | 0.12 | 0.12 |
+| open:800 | 20 | 2 | 130.7 | 0 | 2007.1 | 2012.7 | 2021.8 | 2105.1 | 23151 | 23151 | 0.99 | 0.37 | 0.08 | 0.09 |
+| closed | 20 | 3 | 134.6 | 111 | 153.1 | 183.2 | 194.1 | 244.4 | 0 | 0 | 0.99 | 0.25 | 0.12 | 0.12 |
+| open:800 | 20 | 3 | 133.2 | 0 | 2007.3 | 2013.8 | 2635.9 | 3185.4 | 23039 | 23039 | 0.99 | 0.36 | 0.08 | 0.10 |
+
+Median across reps:
+
+| mode | clients | reps | acked/s | worst 1s | p50 ms | p95 ms | p99 ms |
+|---|---|---|---|---|---|---|---|
+| closed | 20 | 3 | 134.5 | 111 | 153.1 | 185.5 | 203.0 |
+| open:800 | 20 | 3 | 133.2 | 0 | 2007.1 | 2012.7 | 2021.8 |
+
+Convergence (arrival order compares all clients; inversions are seqs arriving after a higher seq):
+
+| mode | clients | rep | same arrival order | content = DB | clients with inversions | max inversions | gaps | dups | DB contiguous | currentSeq = max | DB rows | persist failures | crashed |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| closed | 20 | 1 | true | true | 0/20 | 0 | 0 | 0 | true | true | 4656 | 0 | false |
+| open:800 | 20 | 1 | true | true | 0/20 | 0 | 0 | 0 | true | true | 5350 | 22650 | false |
+| closed | 20 | 2 | true | true | 0/20 | 0 | 0 | 0 | true | true | 4509 | 0 | false |
+| open:800 | 20 | 2 | true | true | 0/20 | 0 | 0 | 0 | true | true | 4849 | 23151 | false |
+| closed | 20 | 3 | true | true | 0/20 | 0 | 0 | 0 | true | true | 4665 | 0 | false |
+| open:800 | 20 | 3 | true | true | 0/20 | 0 | 0 | 0 | true | true | 4961 | 23039 | false |
+
+### Throughput: `gc-new-fullfsync`
+
+Commit `dc6ccfbd8b413bd4e74834491516184017445724`, Apple M1 Pro, 10 cores, 16 GB, darwin 27.0.0, Node v24.14.1. Postgres 17.10 (Homebrew): fsync=on, synchronous_commit=on, wal_sync_method=fsync_writethrough. 30s measured after 5s warm-up, fresh server and room per run.
+
+| mode | clients | rep | acked/s | worst 1s | p50 ms | p95 ms | p99 ms | max ms | errors | unacked | ops per commit | server CPU | PG CPU | harness ELU |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| closed | 20 | 1 | 1348.7 | 1061 | 14.0 | 21.3 | 26.9 | 104.0 | 0 | 0 | 9.91 | 0.28 | 0.11 | 0.22 |
+| open:800 | 20 | 1 | 800.0 | 617 | 13.6 | 22.0 | 219.7 | 463.5 | 0 | 0 | 5.80 | 0.25 | 0.12 | 0.17 |
+| closed | 20 | 2 | 1362.2 | 1266 | 14.7 | 18.4 | 21.9 | 36.7 | 0 | 0 | 9.91 | 0.30 | 0.11 | 0.17 |
+| open:800 | 20 | 2 | 800.0 | 788 | 13.7 | 20.0 | 24.4 | 71.6 | 0 | 0 | 5.65 | 0.26 | 0.13 | 0.20 |
+| closed | 20 | 3 | 1288.1 | 1179 | 15.3 | 20.8 | 24.8 | 32.4 | 0 | 0 | 9.92 | 0.30 | 0.11 | 0.23 |
+| open:800 | 20 | 3 | 800.0 | 788 | 13.0 | 20.3 | 26.4 | 49.6 | 0 | 0 | 5.29 | 0.24 | 0.12 | 0.23 |
+
+Median across reps:
+
+| mode | clients | reps | acked/s | worst 1s | p50 ms | p95 ms | p99 ms |
+|---|---|---|---|---|---|---|---|
+| closed | 20 | 3 | 1348.7 | 1179 | 14.7 | 20.8 | 24.8 |
+| open:800 | 20 | 3 | 800.0 | 788 | 13.6 | 20.3 | 26.4 |
+
+Convergence (arrival order compares all clients; inversions are seqs arriving after a higher seq):
+
+| mode | clients | rep | same arrival order | content = DB | clients with inversions | max inversions | gaps | dups | DB contiguous | currentSeq = max | DB rows | persist failures | crashed |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| closed | 20 | 1 | true | true | 0/20 | 0 | 0 | 0 | true | true | 47102 | 0 | false |
+| open:800 | 20 | 1 | true | true | 0/20 | 0 | 0 | 0 | true | true | 28000 | 0 | false |
+| closed | 20 | 2 | true | true | 0/20 | 0 | 0 | 0 | true | true | 47918 | 0 | false |
+| open:800 | 20 | 2 | true | true | 0/20 | 0 | 0 | 0 | true | true | 28000 | 0 | false |
+| closed | 20 | 3 | true | true | 0/20 | 0 | 0 | 0 | true | true | 45060 | 0 | false |
+| open:800 | 20 | 3 | true | true | 0/20 | 0 | 0 | 0 | true | true | 27999 | 0 | false |
+
+### Throughput: `phase2-final`
+
+Commit `edd57411bf10e69cbe8064fd0ad67670c54bee3c`, Apple M1 Pro, 10 cores, 16 GB, darwin 27.0.0, Node v24.14.1. Postgres 17.10 (Homebrew): fsync=on, synchronous_commit=on, wal_sync_method=open_datasync. 30s measured after 5s warm-up, fresh server and room per run.
+
+| mode | clients | rep | acked/s | worst 1s | p50 ms | p95 ms | p99 ms | max ms | errors | unacked | ops per commit | server CPU | PG CPU | harness ELU |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| closed | 5 | 1 | 262.2 | 236 | 19.3 | 24.4 | 28.8 | 55.3 | 0 | 0 | 2.48 | 0.16 | 0.16 | 0.12 |
+| closed | 20 | 1 | 967.9 | 899 | 20.8 | 25.1 | 28.9 | 34.0 | 0 | 0 | 9.84 | 0.24 | 0.09 | 0.17 |
+| closed | 50 | 1 | 1887.8 | 1347 | 25.9 | 30.1 | 40.8 | 181.3 | 0 | 0 | 23.90 | 0.50 | 0.06 | 0.31 |
+| open:800 | 5 | 1 | 800.0 | 788 | 16.4 | 24.3 | 29.3 | 46.7 | 0 | 0 | 7.30 | 0.19 | 0.16 | 0.18 |
+| open:800 | 20 | 1 | 800.0 | 788 | 18.8 | 25.6 | 28.7 | 48.4 | 0 | 0 | 7.97 | 0.25 | 0.11 | 0.20 |
+| open:800 | 50 | 1 | 800.0 | 786 | 21.5 | 27.5 | 32.2 | 60.3 | 0 | 0 | 8.93 | 0.30 | 0.07 | 0.22 |
+
+Median across reps:
+
+| mode | clients | reps | acked/s | worst 1s | p50 ms | p95 ms | p99 ms |
+|---|---|---|---|---|---|---|---|
+| closed | 5 | 1 | 262.2 | 236 | 19.3 | 24.4 | 28.8 |
+| closed | 20 | 1 | 967.9 | 899 | 20.8 | 25.1 | 28.9 |
+| closed | 50 | 1 | 1887.8 | 1347 | 25.9 | 30.1 | 40.8 |
+| open:800 | 5 | 1 | 800.0 | 788 | 16.4 | 24.3 | 29.3 |
+| open:800 | 20 | 1 | 800.0 | 788 | 18.8 | 25.6 | 28.7 |
+| open:800 | 50 | 1 | 800.0 | 786 | 21.5 | 27.5 | 32.2 |
+
+Convergence (arrival order compares all clients; inversions are seqs arriving after a higher seq):
+
+| mode | clients | rep | same arrival order | content = DB | clients with inversions | max inversions | gaps | dups | DB contiguous | currentSeq = max | DB rows | persist failures | crashed |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| closed | 5 | 1 | true | true | 0/5 | 0 | 0 | 0 | true | true | 9125 | 0 | false |
+| closed | 20 | 1 | true | true | 0/20 | 0 | 0 | 0 | true | true | 33819 | 0 | false |
+| closed | 50 | 1 | true | true | 0/50 | 0 | 0 | 0 | true | true | 66400 | 0 | false |
+| open:800 | 5 | 1 | true | true | 0/5 | 0 | 0 | 0 | true | true | 28000 | 0 | false |
+| open:800 | 20 | 1 | true | true | 0/20 | 0 | 0 | 0 | true | true | 28000 | 0 | false |
+| open:800 | 50 | 1 | true | true | 0/50 | 0 | 0 | 0 | true | true | 28000 | 0 | false |
+
+### Throughput: `phase2-final-nodelay`
+
+Commit `edd57411bf10e69cbe8064fd0ad67670c54bee3c`, Apple M1 Pro, 10 cores, 16 GB, darwin 27.0.0, Node v24.14.1. Postgres 17.10 (Homebrew): fsync=on, synchronous_commit=on, wal_sync_method=open_datasync. 30s measured after 5s warm-up, fresh server and room per run.
+
+| mode | clients | rep | acked/s | worst 1s | p50 ms | p95 ms | p99 ms | max ms | errors | unacked | ops per commit | server CPU | PG CPU | harness ELU |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| closed | 5 | 1 | 6433.5 | 4542 | 0.7 | 1.0 | 1.6 | 18.3 | 0 | 0 | 2.50 | 0.38 | 0.48 | 0.23 |
+| closed | 20 | 1 | 5806.8 | 4737 | 3.7 | 4.3 | 5.8 | 18.7 | 0 | 0 | 9.96 | 0.56 | 0.20 | 0.38 |
+| closed | 50 | 1 | 3815.7 | 3585 | 13.2 | 15.0 | 16.9 | 35.1 | 0 | 0 | 24.42 | 0.92 | 0.10 | 0.51 |
+| open:800 | 5 | 1 | 800.0 | 795 | 2.3 | 4.5 | 7.0 | 17.2 | 0 | 0 | 1.11 | 0.23 | 0.29 | 0.09 |
+| open:800 | 20 | 1 | 800.0 | 799 | 2.6 | 4.3 | 6.5 | 16.2 | 0 | 0 | 1.18 | 0.30 | 0.25 | 0.13 |
+| open:800 | 50 | 1 | 800.0 | 799 | 2.5 | 4.2 | 8.1 | 34.1 | 0 | 0 | 1.11 | 0.31 | 0.18 | 0.16 |
+
+Median across reps:
+
+| mode | clients | reps | acked/s | worst 1s | p50 ms | p95 ms | p99 ms |
+|---|---|---|---|---|---|---|---|
+| closed | 5 | 1 | 6433.5 | 4542 | 0.7 | 1.0 | 1.6 |
+| closed | 20 | 1 | 5806.8 | 4737 | 3.7 | 4.3 | 5.8 |
+| closed | 50 | 1 | 3815.7 | 3585 | 13.2 | 15.0 | 16.9 |
+| open:800 | 5 | 1 | 800.0 | 795 | 2.3 | 4.5 | 7.0 |
+| open:800 | 20 | 1 | 800.0 | 799 | 2.6 | 4.3 | 6.5 |
+| open:800 | 50 | 1 | 800.0 | 799 | 2.5 | 4.2 | 8.1 |
+
+Convergence (arrival order compares all clients; inversions are seqs arriving after a higher seq):
+
+| mode | clients | rep | same arrival order | content = DB | clients with inversions | max inversions | gaps | dups | DB contiguous | currentSeq = max | DB rows | persist failures | crashed |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| closed | 5 | 1 | true | true | 0/5 | 0 | 0 | 0 | true | true | 224481 | 0 | false |
+| closed | 20 | 1 | true | true | 0/20 | 0 | 0 | 0 | true | true | 204702 | 0 | false |
+| closed | 50 | 1 | true | true | 0/50 | 0 | 0 | 0 | true | true | 133234 | 0 | false |
+| open:800 | 5 | 1 | true | true | 0/5 | 0 | 0 | 0 | true | true | 28000 | 0 | false |
+| open:800 | 20 | 1 | true | true | 0/20 | 0 | 0 | 0 | true | true | 28000 | 0 | false |
+| open:800 | 50 | 1 | true | true | 0/50 | 0 | 0 | 0 | true | true | 28000 | 0 | false |

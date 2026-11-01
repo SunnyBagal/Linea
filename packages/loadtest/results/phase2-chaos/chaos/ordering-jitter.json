@@ -1,0 +1,57 @@
+{
+  "case": "ordering-jitter",
+  "pass": true,
+  "env": {
+    "gitSha": "edd57411bf10e69cbe8064fd0ad67670c54bee3c",
+    "serverSourceDirty": false,
+    "cpu": "Apple M1 Pro",
+    "cores": 10,
+    "memGb": 16,
+    "platform": "darwin 27.0.0",
+    "node": "v24.14.1"
+  },
+  "checks": [
+    {
+      "name": "load actually ran",
+      "pass": true,
+      "detail": {
+        "rows": 6120
+      }
+    },
+    {
+      "name": "no client sees seq numbers out of order",
+      "pass": true,
+      "detail": {
+        "perClient": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "database seq contiguous",
+      "pass": true
+    }
+  ],
+  "facts": {
+    "rows": 6120,
+    "inversionsPerClient": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  }
+}

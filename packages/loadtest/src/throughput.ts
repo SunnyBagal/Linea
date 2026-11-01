@@ -94,7 +94,7 @@ async function runCell(mode: string, clients: number, rep: number) {
     }));
   }
   await Promise.all(ready);
-  // join_room has no ack frame, so give every join time to land before sending.
+  // Give every join time to land before sending.
   await sleep(1000);
 
   const cpuPgStart = { at: 0, value: null as number | null };

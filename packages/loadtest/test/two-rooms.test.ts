@@ -79,7 +79,8 @@ test('op sent to a room the client never joined is rejected', async () => {
     record.fact('memberReceived', member.frames.map((f) => f.type));
     record.fact('outsiderReplies', outsider.frames.map((f) => f.type));
     record.check('op from a non-member is not persisted', !persisted);
-    record.check('frames from a non-member are not broadcast', member.frames.length === 0,
+    record.check('frames from a non-member are not broadcast',
+      member.ofType('op').length === 0 && member.ofType('chat').length === 0,
       { received: member.frames.map((f) => f.type) });
     record.check('rejected op gets the existing error frame', outsider.ofType('error').length === 1,
       { replies: outsider.frames.map((f) => f.type) });

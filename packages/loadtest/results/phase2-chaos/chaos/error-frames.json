@@ -1,0 +1,52 @@
+{
+  "case": "error-frames",
+  "pass": true,
+  "env": {
+    "gitSha": "edd57411bf10e69cbe8064fd0ad67670c54bee3c",
+    "serverSourceDirty": false,
+    "cpu": "Apple M1 Pro",
+    "cores": 10,
+    "memGb": 16,
+    "platform": "darwin 27.0.0",
+    "node": "v24.14.1"
+  },
+  "checks": [
+    {
+      "name": "failed insert names room, shape and type",
+      "pass": true,
+      "detail": {
+        "type": "error",
+        "roomId": 35,
+        "shapeId": "blocked-a9ad85119e",
+        "opType": "UPDATE",
+        "message": "Failed to apply operation."
+      }
+    },
+    {
+      "name": "the failed op used no seq",
+      "pass": true,
+      "detail": 1
+    },
+    {
+      "name": "op from a non-member names room, shape and type",
+      "pass": true,
+      "detail": {
+        "type": "error",
+        "roomId": 35,
+        "shapeId": "outside-6fd2647334",
+        "opType": "CREATE",
+        "message": "Failed to apply operation."
+      }
+    },
+    {
+      "name": "failed join names the room and no shape",
+      "pass": true,
+      "detail": {
+        "type": "error",
+        "roomId": 2000000000,
+        "message": "Failed to join room."
+      }
+    }
+  ],
+  "facts": {}
+}

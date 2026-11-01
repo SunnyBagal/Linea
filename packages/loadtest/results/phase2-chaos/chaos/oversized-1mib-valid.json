@@ -1,0 +1,50 @@
+{
+  "case": "oversized-1mib-valid",
+  "pass": true,
+  "env": {
+    "gitSha": "edd57411bf10e69cbe8064fd0ad67670c54bee3c",
+    "serverSourceDirty": false,
+    "cpu": "Apple M1 Pro",
+    "cores": 10,
+    "memGb": 16,
+    "platform": "darwin 27.0.0",
+    "node": "v24.14.1"
+  },
+  "checks": [
+    {
+      "name": "server stays up",
+      "pass": true,
+      "detail": {
+        "exit": null,
+        "log": "ws server on 18080\n"
+      }
+    },
+    {
+      "name": "bystander connection survives",
+      "pass": true
+    },
+    {
+      "name": "frame within the limit is persisted",
+      "pass": true
+    },
+    {
+      "name": "a rejected frame is not copied into the log",
+      "pass": true,
+      "detail": {
+        "logAdded": 0
+      }
+    }
+  ],
+  "facts": {
+    "frameBytes": 1047706,
+    "acked": true,
+    "persisted": true,
+    "attackerCloseCode": null,
+    "errorFrames": 0,
+    "rssBeforeMb": 119.40625,
+    "rssPeakMb": 120.390625,
+    "logBytesAdded": 0,
+    "bystanderWorstAckMs": 37.371208000000024,
+    "bystanderSamples": 111
+  }
+}

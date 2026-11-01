@@ -1,0 +1,94 @@
+{
+  "case": "e2e-rollback",
+  "pass": true,
+  "env": {
+    "gitSha": "edd57411bf10e69cbe8064fd0ad67670c54bee3c",
+    "serverSourceDirty": false,
+    "cpu": "Apple M1 Pro",
+    "cores": 10,
+    "memGb": 16,
+    "platform": "darwin 27.0.0",
+    "node": "v24.14.1"
+  },
+  "checks": [
+    {
+      "name": "rejected CREATE: frame names the shape",
+      "pass": true,
+      "detail": {
+        "type": "error",
+        "roomId": 68,
+        "shapeId": "99028699-8d4e-4449-aa4f-81452cfa7adb",
+        "opType": "CREATE",
+        "message": "Failed to apply operation."
+      }
+    },
+    {
+      "name": "rejected CREATE: canvas goes back",
+      "pass": true
+    },
+    {
+      "name": "rejected CREATE: notice shows",
+      "pass": true
+    },
+    {
+      "name": "rejected CREATE: its undo step is removed",
+      "pass": true,
+      "detail": {
+        "type": "error",
+        "roomId": 68,
+        "shapeId": "62901ca3-866e-4a8f-b4dd-86ca9271f13e",
+        "opType": "DELETE",
+        "message": "Failed to apply operation."
+      }
+    },
+    {
+      "name": "rejected undo: canvas goes back",
+      "pass": true
+    },
+    {
+      "name": "rejected undo: its step can be retried",
+      "pass": true
+    },
+    {
+      "name": "notice clears by itself",
+      "pass": true
+    },
+    {
+      "name": "rejected drag: frame is the UPDATE",
+      "pass": true,
+      "detail": {
+        "type": "error",
+        "roomId": 68,
+        "shapeId": "44534e6f-58b9-436e-afd1-50b52c3b8a75",
+        "opType": "UPDATE",
+        "message": "Failed to apply operation."
+      }
+    },
+    {
+      "name": "rejected drag: shape returns to where it was",
+      "pass": true
+    },
+    {
+      "name": "only accepted ops are in the database",
+      "pass": true,
+      "detail": 4
+    },
+    {
+      "name": "watching tab matches the author exactly",
+      "pass": true
+    },
+    {
+      "name": "watching tab saw only accepted ops",
+      "pass": true,
+      "detail": 4
+    },
+    {
+      "name": "tab opened afterwards matches exactly",
+      "pass": true
+    }
+  ],
+  "facts": {
+    "dbRows": 4,
+    "errorFrames": 3
+  }
+}

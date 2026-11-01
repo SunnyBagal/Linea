@@ -1,0 +1,51 @@
+{
+  "case": "catchup-late-join",
+  "pass": true,
+  "env": {
+    "gitSha": "edd57411bf10e69cbe8064fd0ad67670c54bee3c",
+    "serverSourceDirty": false,
+    "cpu": "Apple M1 Pro",
+    "cores": 10,
+    "memGb": 16,
+    "platform": "darwin 27.0.0",
+    "node": "v24.14.1"
+  },
+  "checks": [
+    {
+      "name": "catch-up leaves no missing ops",
+      "pass": true,
+      "detail": {
+        "missing": 0,
+        "duplicates": 0
+      }
+    },
+    {
+      "name": "catch-up leaves no duplicate ops",
+      "pass": true,
+      "detail": {
+        "missing": 0,
+        "duplicates": 0
+      }
+    },
+    {
+      "name": "every session ends with seqs 1..N exactly",
+      "pass": true,
+      "detail": {
+        "fullLogs": 6,
+        "sessions": 6
+      }
+    }
+  ],
+  "facts": {
+    "sessionsPerFlow": 6,
+    "dbRows": 663,
+    "oldFlow": {
+      "missing": 49,
+      "duplicates": 0
+    },
+    "newFlow": {
+      "missing": 0,
+      "duplicates": 0
+    }
+  }
+}

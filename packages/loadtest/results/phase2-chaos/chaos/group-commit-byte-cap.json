@@ -1,0 +1,148 @@
+{
+  "case": "group-commit-byte-cap",
+  "pass": true,
+  "env": {
+    "gitSha": "edd57411bf10e69cbe8064fd0ad67670c54bee3c",
+    "serverSourceDirty": false,
+    "cpu": "Apple M1 Pro",
+    "cores": 10,
+    "memGb": 16,
+    "platform": "darwin 27.0.0",
+    "node": "v24.14.1"
+  },
+  "checks": [
+    {
+      "name": "ops were answered",
+      "pass": true
+    },
+    {
+      "name": "some ops shared a commit",
+      "pass": true,
+      "detail": [
+        {
+          "ops": 1,
+          "bytes": 921684
+        },
+        {
+          "ops": 4,
+          "bytes": 3686736
+        },
+        {
+          "ops": 4,
+          "bytes": 3686736
+        },
+        {
+          "ops": 4,
+          "bytes": 3686736
+        },
+        {
+          "ops": 4,
+          "bytes": 3686736
+        },
+        {
+          "ops": 4,
+          "bytes": 3686736
+        },
+        {
+          "ops": 4,
+          "bytes": 3686736
+        },
+        {
+          "ops": 4,
+          "bytes": 3686736
+        },
+        {
+          "ops": 1,
+          "bytes": 921684
+        }
+      ]
+    },
+    {
+      "name": "no commit exceeds the byte cap",
+      "pass": true,
+      "detail": [
+        {
+          "ops": 1,
+          "bytes": 921684
+        },
+        {
+          "ops": 4,
+          "bytes": 3686736
+        },
+        {
+          "ops": 4,
+          "bytes": 3686736
+        },
+        {
+          "ops": 4,
+          "bytes": 3686736
+        },
+        {
+          "ops": 4,
+          "bytes": 3686736
+        },
+        {
+          "ops": 4,
+          "bytes": 3686736
+        },
+        {
+          "ops": 4,
+          "bytes": 3686736
+        },
+        {
+          "ops": 4,
+          "bytes": 3686736
+        },
+        {
+          "ops": 1,
+          "bytes": 921684
+        }
+      ]
+    },
+    {
+      "name": "database seq contiguous",
+      "pass": true
+    }
+  ],
+  "facts": {
+    "acked": 30,
+    "groups": [
+      {
+        "ops": 1,
+        "bytes": 921684
+      },
+      {
+        "ops": 4,
+        "bytes": 3686736
+      },
+      {
+        "ops": 4,
+        "bytes": 3686736
+      },
+      {
+        "ops": 4,
+        "bytes": 3686736
+      },
+      {
+        "ops": 4,
+        "bytes": 3686736
+      },
+      {
+        "ops": 4,
+        "bytes": 3686736
+      },
+      {
+        "ops": 4,
+        "bytes": 3686736
+      },
+      {
+        "ops": 4,
+        "bytes": 3686736
+      },
+      {
+        "ops": 1,
+        "bytes": 921684
+      }
+    ]
+  }
+}

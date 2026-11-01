@@ -1,0 +1,74 @@
+{
+  "case": "op-without-join",
+  "pass": true,
+  "env": {
+    "gitSha": "edd57411bf10e69cbe8064fd0ad67670c54bee3c",
+    "serverSourceDirty": false,
+    "cpu": "Apple M1 Pro",
+    "cores": 10,
+    "memGb": 16,
+    "platform": "darwin 27.0.0",
+    "node": "v24.14.1"
+  },
+  "checks": [
+    {
+      "name": "op from a non-member is not persisted",
+      "pass": true
+    },
+    {
+      "name": "frames from a non-member are not broadcast",
+      "pass": true,
+      "detail": {
+        "received": [
+          "room_joined"
+        ]
+      }
+    },
+    {
+      "name": "rejected op gets the existing error frame",
+      "pass": true,
+      "detail": {
+        "replies": [
+          "error"
+        ]
+      }
+    },
+    {
+      "name": "ops sent straight after join_room are accepted, in order",
+      "pass": true,
+      "detail": {
+        "acks": [
+          "eager-cb5613d051",
+          "eager-e586cba5eb",
+          "eager-7906044a85"
+        ]
+      }
+    },
+    {
+      "name": "op behind a failed join is rejected",
+      "pass": true,
+      "detail": {
+        "replies": [
+          "error",
+          "error"
+        ]
+      }
+    },
+    {
+      "name": "leave_room during a pending join wins",
+      "pass": true,
+      "detail": {
+        "received": []
+      }
+    }
+  ],
+  "facts": {
+    "persisted": false,
+    "memberReceived": [
+      "room_joined"
+    ],
+    "outsiderReplies": [
+      "error"
+    ]
+  }
+}
