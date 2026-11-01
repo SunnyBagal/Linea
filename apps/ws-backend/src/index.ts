@@ -33,6 +33,7 @@ const server = http.createServer((req, res) => {
 const PORT = Number(process.env.PORT) || 8080;
 const MAX_FRAME_BYTES = 1024 * 1024;
 const MAX_BUFFERED_BYTES = 8 * 1024 * 1024;
+const OP_QUEUE_TIMEOUT_MS = 2000;
 const wss = new WebSocketServer({
   server,
   maxPayload: MAX_FRAME_BYTES,
@@ -49,6 +50,7 @@ interface Connection {
 }
 
 const connections = new Map<WebSocket, Connection>();
+const roomQueues = new Map<number, Promise<void>>();
 
 function checkUser(token: string): string | null {
   try {
@@ -84,6 +86,18 @@ function broadcast(roomId: number, payload: unknown, exclude?: WebSocket) {
       send(conn.ws, data);
     }
   }
+}
+
+// Commit, broadcast and ack run one op at a time per room. Concurrent transactions
+// could finish out of order, sending clients seq 6 before seq 5.
+function enqueueRoomTask(roomId: number, task: () => Promise<void>) {
+  const tail = (roomQueues.get(roomId) ?? Promise.resolve())
+    .then(task)
+    .catch((err) => console.error('room task failed', err))
+    .finally(() => {
+      if (roomQueues.get(roomId) === tail) roomQueues.delete(roomId);
+    });
+  roomQueues.set(roomId, tail);
 }
 
 wss.on('connection', (ws, request) => {
@@ -185,57 +199,65 @@ wss.on('connection', (ws, request) => {
     }
 
     if (msg.type === 'op') {
-      try {
-        const op = await prismaClient.$transaction(async (tx) => {
-          const room = await tx.room.update({
-            where: { 
-              id: msg.roomId 
-            },
-            data: { 
-              currentSeq: { increment: 1 } 
-            },   
-            select: { 
-              currentSeq: true 
-            },
+      const receivedAt = Date.now();
+      enqueueRoomTask(msg.roomId, async () => {
+        try {
+          // Past the wait limit the client gets an error, not an unbounded queue.
+          if (Date.now() - receivedAt > OP_QUEUE_TIMEOUT_MS) {
+            throw new Error('op expired in room queue');
+          }
+
+          const op = await prismaClient.$transaction(async (tx) => {
+            const room = await tx.room.update({
+              where: { 
+                id: msg.roomId 
+              },
+              data: { 
+                currentSeq: { increment: 1 } 
+              },   
+              select: { 
+                currentSeq: true 
+              },
+            });
+
+            return tx.operation.create({
+              data: {
+                roomId: msg.roomId,
+                seq: room.currentSeq,
+                type: msg.opType,
+                shapeId: msg.shapeId,
+                payload: msg.payload ?? Prisma.JsonNull,
+                userId: conn.userId,
+              },
+              select: { seq: true },
+            });
           });
 
-          return tx.operation.create({
-            data: {
-              roomId: msg.roomId,
-              seq: room.currentSeq,
-              type: msg.opType,
-              shapeId: msg.shapeId,
-              payload: msg.payload ?? Prisma.JsonNull,
-              userId: conn.userId,
-            },
-            select: { seq: true },
-          });
-        });
+          broadcast(msg.roomId, {
+            type: 'op',
+            roomId: msg.roomId,
+            seq: op.seq,
+            opType: msg.opType,
+            shapeId: msg.shapeId,
+            payload: msg.payload,
+            userId: conn.userId,
+          }, ws);
 
-        broadcast(msg.roomId, {
-          type: 'op',
-          roomId: msg.roomId,
-          seq: op.seq,
-          opType: msg.opType,
-          shapeId: msg.shapeId,
-          payload: msg.payload,
-          userId: conn.userId,
-        }, ws);
+          send(ws, JSON.stringify({
+            type: 'op_ack',
+            roomId: msg.roomId,
+            shapeId: msg.shapeId,
+            seq: op.seq
+          }));
 
-        send(ws, JSON.stringify({
-          type: 'op_ack',
-          roomId: msg.roomId,
-          shapeId: msg.shapeId,
-          seq: op.seq
-        }));
-
-      } catch (err) {
-        console.error('op persist failed', err);
-        send(ws, JSON.stringify({
-          type: 'error',
-          message: 'Failed to apply operation.'
-        }));
-      }
+        } catch (err) {
+          console.error('op persist failed', err);
+          send(ws, JSON.stringify({
+            type: 'error',
+            message: 'Failed to apply operation.'
+          }));
+        }
+      });
       return;
     }
   });

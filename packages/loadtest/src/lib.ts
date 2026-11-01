@@ -112,7 +112,51 @@ async function waitForPort(port: number, timeoutMs: number): Promise<void> {
 
 let backendCounter = 0;
 
-export async function startBackend(kind: 'ws' | 'http', port: number, name: string): Promise<Backend> {
+/**
+ * A TCP proxy to the local Postgres that delays database responses. Per-connection
+ * order is kept, but random delays let replies from different connections overtake
+ * each other, which makes the commit-order race reproducible within seconds.
+ */
+export async function startDbProxy(delay: () => number): Promise<{ url: string; close(): void }> {
+  const target = new URL(DATABASE_URL);
+  const sockets = new Set<net.Socket>();
+  const server = net.createServer((client) => {
+    const upstream = net.connect(Number(target.port), target.hostname);
+    sockets.add(client);
+    sockets.add(upstream);
+    let releaseAt = 0;
+    client.pipe(upstream);
+    upstream.on('data', (chunk) => {
+      releaseAt = Math.max(releaseAt, Date.now() + delay());
+      setTimeout(() => { if (!client.destroyed) client.write(chunk); }, releaseAt - Date.now());
+    });
+    const closeBoth = () => { client.destroy(); upstream.destroy(); };
+    for (const socket of [client, upstream]) {
+      socket.on('error', closeBoth);
+      socket.on('close', closeBoth);
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as net.AddressInfo;
+  const url = new URL(DATABASE_URL);
+  url.port = String(port);
+  return {
+    url: url.toString(),
+    close() {
+      server.close();
+      for (const socket of sockets) socket.destroy();
+    },
+  };
+}
+
+export async function startBackend(
+  kind: 'ws' | 'http',
+  port: number,
+  name: string,
+  options: { databaseUrl?: string } = {},
+): Promise<Backend> {
+  const databaseUrl = options.databaseUrl ?? DATABASE_URL;
+  assertLocalDatabase(databaseUrl);
   const entry = path.join(REPO_ROOT, 'apps', `${kind}-backend`, 'dist', 'index.js');
   if (!fs.existsSync(entry)) throw new Error(`${entry} missing: run pnpm build:servers first`);
   fs.mkdirSync(LOG_DIR, { recursive: true });
@@ -126,8 +170,8 @@ export async function startBackend(kind: 'ws' | 'http', port: number, name: stri
   const env: NodeJS.ProcessEnv = {
     PATH: process.env.PATH,
     NODE_ENV: 'production',
-    DATABASE_URL,
-    DIRECT_DATABASE_URL: DATABASE_URL,
+    DATABASE_URL: databaseUrl,
+    DIRECT_DATABASE_URL: databaseUrl,
     JWT_SECRET,
     PORT: String(port),
     LOADTEST_PROBE_FILE: probePath,
@@ -390,11 +434,11 @@ export interface Stack {
 const WS_PORT = 18080;
 
 /** A fresh ws-backend, a user and a room, for one test case. */
-export async function startStack(name: string): Promise<Stack> {
+export async function startStack(name: string, options: { databaseUrl?: string } = {}): Promise<Stack> {
   const pool = db();
   const userId = await seedUser(pool);
   const roomId = await seedRoom(pool, userId);
-  const ws = await startBackend('ws', WS_PORT, name);
+  const ws = await startBackend('ws', WS_PORT, name, options);
   return {
     pool,
     ws,
