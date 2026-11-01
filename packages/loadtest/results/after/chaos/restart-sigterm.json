@@ -1,0 +1,149 @@
+{
+  "case": "restart-sigterm",
+  "pass": true,
+  "env": {
+    "gitSha": "ce2deb374ded08db568d9b79653d1c1f5b85cc5c",
+    "serverSourceDirty": false,
+    "cpu": "Apple M1 Pro",
+    "cores": 10,
+    "memGb": 16,
+    "platform": "darwin 27.0.0",
+    "node": "v24.14.1"
+  },
+  "checks": [
+    {
+      "name": "every acked op survives the restart with its seq",
+      "pass": true,
+      "detail": {
+        "lost": 0
+      }
+    },
+    {
+      "name": "db seq contiguous across the restart",
+      "pass": true
+    },
+    {
+      "name": "currentSeq equals max seq",
+      "pass": true
+    },
+    {
+      "name": "seq numbers continue after the restart",
+      "pass": true
+    },
+    {
+      "name": "writers make progress after the restart",
+      "pass": true
+    },
+    {
+      "name": "reconnected clients have no missing ops",
+      "pass": true,
+      "detail": [
+        {
+          "entries": 3756,
+          "maxSeen": 3756,
+          "missing": 0,
+          "duplicates": 0
+        },
+        {
+          "entries": 3756,
+          "maxSeen": 3756,
+          "missing": 0,
+          "duplicates": 0
+        },
+        {
+          "entries": 3756,
+          "maxSeen": 3756,
+          "missing": 0,
+          "duplicates": 0
+        }
+      ]
+    },
+    {
+      "name": "reconnected clients have no duplicate ops",
+      "pass": true,
+      "detail": [
+        {
+          "entries": 3756,
+          "maxSeen": 3756,
+          "missing": 0,
+          "duplicates": 0
+        },
+        {
+          "entries": 3756,
+          "maxSeen": 3756,
+          "missing": 0,
+          "duplicates": 0
+        },
+        {
+          "entries": 3756,
+          "maxSeen": 3756,
+          "missing": 0,
+          "duplicates": 0
+        }
+      ]
+    },
+    {
+      "name": "SIGTERM closes sockets with 1001 or 1012",
+      "pass": true,
+      "detail": {
+        "closeCodes": [
+          1001,
+          1001,
+          1001
+        ]
+      }
+    },
+    {
+      "name": "SIGTERM acks or fails in-flight ops before exit",
+      "pass": true,
+      "detail": {
+        "persistedUnacked": 0
+      }
+    },
+    {
+      "name": "SIGTERM exits cleanly",
+      "pass": true,
+      "detail": {
+        "code": 0,
+        "signal": null
+      }
+    }
+  ],
+  "facts": {
+    "closeCodes": [
+      1001,
+      1001,
+      1001
+    ],
+    "allClosedMs": 1.7050830000007409,
+    "exitBeforeRestart": {
+      "code": 0,
+      "signal": null
+    },
+    "exitMs": 13.062041999999565,
+    "ackedBeforeKill": 1844,
+    "rowsWhenDown": 1844,
+    "persistedButNeverAcked": 0,
+    "ackedAfterRestart": 1912,
+    "sessionDiffs": [
+      {
+        "entries": 3756,
+        "maxSeen": 3756,
+        "missing": 0,
+        "duplicates": 0
+      },
+      {
+        "entries": 3756,
+        "maxSeen": 3756,
+        "missing": 0,
+        "duplicates": 0
+      },
+      {
+        "entries": 3756,
+        "maxSeen": 3756,
+        "missing": 0,
+        "duplicates": 0
+      }
+    ]
+  }
+}

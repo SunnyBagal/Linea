@@ -1,0 +1,45 @@
+{
+  "case": "duplicate-resend",
+  "pass": false,
+  "env": {
+    "gitSha": "ce2deb374ded08db568d9b79653d1c1f5b85cc5c",
+    "serverSourceDirty": false,
+    "cpu": "Apple M1 Pro",
+    "cores": 10,
+    "memGb": 16,
+    "platform": "darwin 27.0.0",
+    "node": "v24.14.1"
+  },
+  "checks": [
+    {
+      "name": "retry after ack creates one row",
+      "pass": false,
+      "detail": {
+        "rows": 2
+      }
+    },
+    {
+      "name": "in-flight double send creates one row",
+      "pass": false,
+      "detail": {
+        "rows": 2
+      }
+    },
+    {
+      "name": "observer sees the retried op once",
+      "pass": false
+    }
+  ],
+  "facts": {
+    "retriedRows": 2,
+    "doubledRows": 2,
+    "observerFramesForRetried": [
+      1,
+      2
+    ],
+    "senderAcksForRetried": [
+      1,
+      2
+    ]
+  }
+}

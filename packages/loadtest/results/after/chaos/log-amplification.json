@@ -1,0 +1,39 @@
+{
+  "case": "log-amplification",
+  "pass": true,
+  "env": {
+    "gitSha": "ce2deb374ded08db568d9b79653d1c1f5b85cc5c",
+    "serverSourceDirty": false,
+    "cpu": "Apple M1 Pro",
+    "cores": 10,
+    "memGb": 16,
+    "platform": "darwin 27.0.0",
+    "node": "v24.14.1"
+  },
+  "checks": [
+    {
+      "name": "server stays up",
+      "pass": true
+    },
+    {
+      "name": "largeJunkField stays under the log limit",
+      "pass": true,
+      "detail": {
+        "bytes": 166
+      }
+    },
+    {
+      "name": "manyInvalidPoints stays under the log limit",
+      "pass": true,
+      "detail": {
+        "bytes": 250
+      }
+    }
+  ],
+  "facts": {
+    "logBytesAdded": {
+      "largeJunkField": 166,
+      "manyInvalidPoints": 250
+    }
+  }
+}

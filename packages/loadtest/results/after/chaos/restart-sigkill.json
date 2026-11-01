@@ -1,0 +1,123 @@
+{
+  "case": "restart-sigkill",
+  "pass": true,
+  "env": {
+    "gitSha": "ce2deb374ded08db568d9b79653d1c1f5b85cc5c",
+    "serverSourceDirty": false,
+    "cpu": "Apple M1 Pro",
+    "cores": 10,
+    "memGb": 16,
+    "platform": "darwin 27.0.0",
+    "node": "v24.14.1"
+  },
+  "checks": [
+    {
+      "name": "every acked op survives the restart with its seq",
+      "pass": true,
+      "detail": {
+        "lost": 0
+      }
+    },
+    {
+      "name": "db seq contiguous across the restart",
+      "pass": true
+    },
+    {
+      "name": "currentSeq equals max seq",
+      "pass": true
+    },
+    {
+      "name": "seq numbers continue after the restart",
+      "pass": true
+    },
+    {
+      "name": "writers make progress after the restart",
+      "pass": true
+    },
+    {
+      "name": "reconnected clients have no missing ops",
+      "pass": true,
+      "detail": [
+        {
+          "entries": 3722,
+          "maxSeen": 3722,
+          "missing": 0,
+          "duplicates": 0
+        },
+        {
+          "entries": 3722,
+          "maxSeen": 3722,
+          "missing": 0,
+          "duplicates": 0
+        },
+        {
+          "entries": 3722,
+          "maxSeen": 3722,
+          "missing": 0,
+          "duplicates": 0
+        }
+      ]
+    },
+    {
+      "name": "reconnected clients have no duplicate ops",
+      "pass": true,
+      "detail": [
+        {
+          "entries": 3722,
+          "maxSeen": 3722,
+          "missing": 0,
+          "duplicates": 0
+        },
+        {
+          "entries": 3722,
+          "maxSeen": 3722,
+          "missing": 0,
+          "duplicates": 0
+        },
+        {
+          "entries": 3722,
+          "maxSeen": 3722,
+          "missing": 0,
+          "duplicates": 0
+        }
+      ]
+    }
+  ],
+  "facts": {
+    "closeCodes": [
+      1006,
+      1006,
+      1006
+    ],
+    "allClosedMs": 8.571542000000136,
+    "exitBeforeRestart": {
+      "code": null,
+      "signal": "SIGKILL"
+    },
+    "exitMs": 8.604833999999755,
+    "ackedBeforeKill": 1836,
+    "rowsWhenDown": 1836,
+    "persistedButNeverAcked": 0,
+    "ackedAfterRestart": 1886,
+    "sessionDiffs": [
+      {
+        "entries": 3722,
+        "maxSeen": 3722,
+        "missing": 0,
+        "duplicates": 0
+      },
+      {
+        "entries": 3722,
+        "maxSeen": 3722,
+        "missing": 0,
+        "duplicates": 0
+      },
+      {
+        "entries": 3722,
+        "maxSeen": 3722,
+        "missing": 0,
+        "duplicates": 0
+      }
+    ]
+  }
+}
