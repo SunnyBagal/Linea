@@ -72,6 +72,35 @@ test('group commit: a burst shares commits, stays contiguous and respects the op
   record.finish();
 });
 
+test('group commit: an op costs one database reply', async () => {
+  const record = new CaseRecord('group-commit-round-trips');
+  let replies = 0;
+  const proxy = await startDbProxy(() => { replies += 1; return 5; });
+  const stack = await startStack('group-commit-round-trips', { databaseUrl: proxy.url });
+  try {
+    const writer = await TestClient.connect(stack.ws.url, stack.token);
+    writer.join(stack.roomId);
+    await writer.waitFor(() => writer.ofType('room_joined').length === 1, 3000);
+    await sleep(100);
+
+    const perOp: number[] = [];
+    for (let i = 0; i < 12; i += 1) {
+      const before = replies;
+      writer.send(rectOp(stack.roomId, uid('single')));
+      await writer.waitFor(() => writer.ofType('op_ack').length === i + 1, 3000);
+      perOp.push(replies - before);
+      await sleep(50);
+    }
+    record.fact('repliesPerOp', perOp);
+    record.check('each lone op takes one database reply', perOp.every((count) => count === 1), perOp);
+    writer.close();
+  } finally {
+    await stack.shutdown();
+    proxy.close();
+  }
+  record.finish();
+});
+
 test('group commit: batches respect the byte cap', async () => {
   const record = new CaseRecord('group-commit-byte-cap');
   const proxy = await startDbProxy(() => 20);

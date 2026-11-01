@@ -5,7 +5,7 @@ import { highestSeq, mergeCatchUp, type LogEntry } from '../../../apps/web/lib/c
 export const HTTP_PORT = 18081;
 export const uid = (prefix = 'op') => `${prefix}-${randomBytes(5).toString('hex')}`;
 
-export const startHttp = (name: string, options: { databaseUrl?: string } = {}): Promise<Backend> =>
+export const startHttp = (name: string, options: { databaseUrl?: string; env?: Record<string, string> } = {}): Promise<Backend> =>
   startBackend('http', HTTP_PORT, name, options);
 
 /** Paces rect ops from one client until stopped, tracking what was sent. */

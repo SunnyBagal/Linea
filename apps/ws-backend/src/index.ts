@@ -118,9 +118,13 @@ function rejectJoin(ws: WebSocket, roomId: number) {
   }));
 }
 
-function rejectOp(op: PendingOp) {
-  send(op.ws, JSON.stringify({
+// Names the op, so the client can roll back the optimistic change it made for it.
+function rejectOp(ws: WebSocket, op: Pick<PendingOp, 'roomId' | 'shapeId' | 'opType'>) {
+  send(ws, JSON.stringify({
     type: 'error',
+    roomId: op.roomId,
+    shapeId: op.shapeId,
+    opType: op.opType,
     message: 'Failed to apply operation.'
   }));
 }
@@ -192,7 +196,7 @@ async function commitAndPublish(roomId: number, batch: PendingOp[]) {
   } catch (err) {
     if (batch.length === 1) {
       console.error('op persist failed', err);
-      rejectOp(batch[0]!);
+      rejectOp(batch[0]!.ws, batch[0]!);
       return;
     }
   }
@@ -216,7 +220,7 @@ function takeBatch(queue: RoomQueue): PendingOp[] {
     if (Date.now() - op.receivedAt > OP_QUEUE_TIMEOUT_MS) {
       queue.pending.shift();
       console.error('op persist failed: expired in room queue');
-      rejectOp(op);
+      rejectOp(op.ws, op);
       continue;
     }
 
@@ -382,12 +386,7 @@ wss.on('connection', (ws, request) => {
     }
 
     if (!conn.rooms.has(msg.roomId)) {
-      if (msg.type === 'op') {
-        send(ws, JSON.stringify({
-          type: 'error',
-          message: 'Failed to apply operation.'
-        }));
-      }
+      if (msg.type === 'op') rejectOp(ws, msg);
       return;
     }
 
@@ -410,10 +409,7 @@ wss.on('connection', (ws, request) => {
 
     if (msg.type === 'op') {
       if (shuttingDown) {
-        send(ws, JSON.stringify({
-          type: 'error',
-          message: 'Failed to apply operation.'
-        }));
+        rejectOp(ws, msg);
         return;
       }
 

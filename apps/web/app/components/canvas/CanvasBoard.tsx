@@ -10,7 +10,9 @@ import {
 } from "../../../lib/canvas/canvas";
 import { useRouter } from "next/navigation";
 import { BACKEND_URL } from "../../../config";
-import { applyAck, highestSeq, mergeCatchUp, type LogEntry } from "../../../lib/canvas/oplog";
+import {
+  applyAck, highestSeq, mergeCatchUp, rejectEntry, undoStackAfterReject, type LogEntry,
+} from "../../../lib/canvas/oplog";
 
 const TOOLS: { id: Tool; glyph: string; key: string }[] = [
   { id: "select", glyph: "↖", key: "v" },
@@ -27,6 +29,7 @@ const MIN_POINT_DIST_SQ = 4;
 const JOIN_REPLY_TIMEOUT_MS = 3000;
 const CATCH_UP_RETRIES = 3;
 const CATCH_UP_RETRY_MS = 500;
+const NOTICE_MS = 4000;
 
 export default function CanvasBoard({ slug }: { slug: string }) {
   const router = useRouter();
@@ -40,6 +43,7 @@ export default function CanvasBoard({ slug }: { slug: string }) {
   const undoStackRef = useRef<CanvasOp[]>([]);
   const [roomId, setRoomId] = useState<number | null>(null);
   const [roomError, setRoomError] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const opLogRef = useRef<LogEntry[]>([]);
   const [tool, setTool] = useState<Tool>("select");
   const toolRef = useRef<Tool>("select");
@@ -242,6 +246,12 @@ export default function CanvasBoard({ slug }: { slug: string }) {
   }, []);
 
   useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -277,6 +287,15 @@ export default function CanvasBoard({ slug }: { slug: string }) {
     // were saved, the fetch below brings them back.
     opLogRef.current = opLogRef.current.filter((o) => o.seq !== undefined);
 
+    const refold = () => {
+      const shapes = foldOps(opLogRef.current);
+      shapesRef.current = shapes;
+      if (selectedIdRef.current && !shapes.some((s) => s.id === selectedIdRef.current)) {
+        selectedIdRef.current = null;
+      }
+      redrawRef.current();
+    };
+
     const hydrate = async (expectedSeq: number) => {
       const run = ++hydrateRun;
       let ops = await fetchOperations(roomId);
@@ -286,18 +305,16 @@ export default function CanvasBoard({ slug }: { slug: string }) {
         ops = await fetchOperations(roomId);
       }
       if (run !== hydrateRun) return;
+      if (highestSeq(ops) < expectedSeq) {
+        setNotice("Couldn't load the whole canvas. Reload to try again.");
+      }
 
       const merged = mergeCatchUp(ops, opBuffer, opLogRef.current);
       opLogRef.current = merged;
       opBuffer.length = 0;
       lastSeq = highestSeq(merged);
-      const shapes = foldOps(merged); // O(n) batch replay of the merged log
-      shapesRef.current = shapes;
-      if (selectedIdRef.current && !shapes.some((s) => s.id === selectedIdRef.current)) {
-        selectedIdRef.current = null;
-      }
+      refold(); // O(n) batch replay of the merged log
       hydrating = false;
-      redrawRef.current();
     };
 
     const joinFallback = setTimeout(() => {
@@ -314,6 +331,28 @@ export default function CanvasBoard({ slug }: { slug: string }) {
           if (data.roomId !== roomId) return;
           clearTimeout(joinFallback);
           hydrate(data.seq);
+          return;
+        }
+
+        if (data.type === "error") {
+          if (data.roomId !== undefined && data.roomId !== roomId) return;
+
+          if (data.shapeId && data.opType) {
+            const { log, rejected } = rejectEntry(opLogRef.current, data.shapeId, data.opType);
+            if (!rejected) return;
+            opLogRef.current = log;
+            undoStackRef.current = undoStackAfterReject(undoStackRef.current, rejected);
+            refold();
+            setNotice("Couldn't save your last change, so it was undone.");
+            return;
+          }
+
+          // Only a failed join has no shapeId. Show what's saved, and say edits won't stick.
+          setNotice("Couldn't connect to this canvas. Your changes may not save.");
+          if (hydrating) {
+            clearTimeout(joinFallback);
+            hydrate(0);
+          }
           return;
         }
 
@@ -352,7 +391,7 @@ export default function CanvasBoard({ slug }: { slug: string }) {
     };
     socket.addEventListener("message", onSocketMessage);
 
-    const emitOp = (op: CanvasOp) => {
+    const emitOp = (op: LogEntry) => {
       shapesRef.current = applyOp(shapesRef.current, op);
       opLogRef.current.push({ ...op, seq: undefined }); 
       socket.send(JSON.stringify({
@@ -364,9 +403,16 @@ export default function CanvasBoard({ slug }: { slug: string }) {
       }));
     };
 
+    const emitUndoable = (op: CanvasOp, inverse: CanvasOp) => {
+      undoStackRef.current.push(inverse);
+      emitOp({ ...op, undoEntry: inverse });
+    };
+
     emitTextRef.current = (shape: Shape) => {
-      undoStackRef.current.push({ opType: "DELETE", shapeId: shape.id, payload: null });
-      emitOp({ opType: "CREATE", shapeId: shape.id, payload: shape });
+      emitUndoable(
+        { opType: "CREATE", shapeId: shape.id, payload: shape },
+        { opType: "DELETE", shapeId: shape.id, payload: null },
+      );
       redrawRef.current();
     };
 
@@ -374,7 +420,7 @@ export default function CanvasBoard({ slug }: { slug: string }) {
       const inverse = undoStackRef.current.pop();
       if (!inverse) return;
       selectedIdRef.current = null;
-      emitOp(inverse);
+      emitOp({ ...inverse, undoRestore: inverse });
       redrawRef.current();
     };
 
@@ -414,9 +460,11 @@ export default function CanvasBoard({ slug }: { slug: string }) {
         const id = selectedIdRef.current;
         const deleted = shapesRef.current.find((s) => s.id === id);
         if (!deleted) return;
-        undoStackRef.current.push({ opType: "CREATE", shapeId: id, payload: deleted });
         selectedIdRef.current = null;
-        emitOp({ opType: "DELETE", shapeId: id, payload: null });
+        emitUndoable(
+          { opType: "DELETE", shapeId: id, payload: null },
+          { opType: "CREATE", shapeId: id, payload: deleted },
+        );
         redrawRef.current();
       }
     };
@@ -541,15 +589,10 @@ export default function CanvasBoard({ slug }: { slug: string }) {
           );
           return
         }
-        undoStackRef.current.push({ opType: "UPDATE", shapeId: orig.id, payload: orig });
-        opLogRef.current.push({ opType: "UPDATE", shapeId: moved.id, payload: moved, seq: undefined });
-        socket.send(JSON.stringify({
-          type: "op",
-          roomId,
-          opType: "UPDATE",
-          shapeId: moved.id,
-          payload: moved,
-        }));
+        emitUndoable(
+          { opType: "UPDATE", shapeId: moved.id, payload: moved },
+          { opType: "UPDATE", shapeId: orig.id, payload: orig },
+        );
         return;
       }
 
@@ -579,8 +622,10 @@ export default function CanvasBoard({ slug }: { slug: string }) {
       if (!geometry) return;
 
       const shape: Shape = { ...geometry, id: crypto.randomUUID() };
-      undoStackRef.current.push({ opType: "DELETE", shapeId: shape.id, payload: null });
-      emitOp({ opType: "CREATE", shapeId: shape.id, payload: shape });
+      emitUndoable(
+        { opType: "CREATE", shapeId: shape.id, payload: shape },
+        { opType: "DELETE", shapeId: shape.id, payload: null },
+      );
       redrawRef.current();
     };
 
@@ -646,6 +691,15 @@ export default function CanvasBoard({ slug }: { slug: string }) {
         }`}
         style={{ background: getThemeBg(theme) }}
       />
+
+      {notice && (
+        <div
+          role="status"
+          className="pointer-events-none fixed bottom-4 left-1/2 z-50 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-lg bg-[#0e1110] px-3 py-2 text-sm text-neutral-200 shadow-lg ring-1 ring-white/10"
+        >
+          {notice}
+        </div>
+      )}
 
       {textEditor && (
         <input

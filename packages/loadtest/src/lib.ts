@@ -97,7 +97,7 @@ export interface ProbeSample {
   sockets: number;
 }
 
-async function waitForPort(port: number, timeoutMs: number): Promise<void> {
+export async function waitForPort(port: number, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const open = await new Promise<boolean>((resolve) => {
@@ -154,7 +154,7 @@ export async function startBackend(
   kind: 'ws' | 'http',
   port: number,
   name: string,
-  options: { databaseUrl?: string } = {},
+  options: { databaseUrl?: string; env?: Record<string, string> } = {},
 ): Promise<Backend> {
   const databaseUrl = options.databaseUrl ?? DATABASE_URL;
   assertLocalDatabase(databaseUrl);
@@ -176,6 +176,7 @@ export async function startBackend(
     JWT_SECRET,
     PORT: String(port),
     LOADTEST_PROBE_FILE: probePath,
+    ...options.env,
   };
   const args = kind === 'ws'
     ? ['--require', path.join(PKG_DIR, 'src', 'probe.cjs'), entry]
