@@ -57,6 +57,7 @@ test('database outage does not take the server down', async () => {
     record.check('op during the outage gets an error frame', opError);
     record.check('server survives op and chat during the outage', aliveAfterOp, stack.ws.exitInfo());
     record.check('server survives join_room during the outage', aliveAfterJoin, exitDuringOutage);
+    record.check('failed join_room gets an error frame', (joiner?.ofType('error').length ?? 0) > 0);
     record.check('ops flow again once the database returns', recovered);
     record.check('db seq contiguous after the outage', audit.contiguousFromOne && audit.currentSeqMatchesMax);
     client.close();

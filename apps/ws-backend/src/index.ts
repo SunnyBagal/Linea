@@ -115,19 +115,28 @@ wss.on('connection', (ws, request) => {
 
     if (msg.type === 'join_room') {
 
-      const room = await prismaClient.room.findUnique({
-        where: { 
-          id: msg.roomId 
-        },
-        select: { 
-          id: true 
-        },
-      });
+      try {
+        const room = await prismaClient.room.findUnique({
+          where: {
+            id: msg.roomId
+          },
+          select: {
+            id: true
+          },
+        });
 
-      if (room) {
-        conn.rooms.add(msg.roomId)
-      };
+        if (room) {
+          conn.rooms.add(msg.roomId);
+          return;
+        }
+      } catch (err) {
+        console.error('join_room failed', err);
+      }
 
+      ws.send(JSON.stringify({
+        type: 'error',
+        message: 'Failed to join room.'
+      }));
       return;
     }
 
