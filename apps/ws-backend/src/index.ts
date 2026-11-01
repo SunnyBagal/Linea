@@ -109,8 +109,13 @@ wss.on('connection', (ws, request) => {
 
     const result = WsMessageSchema.safeParse(parsed);
     if (!result.success){
-      console.log("WS frome rejected: ", result.error.issues);
-      console.log(" raw frame was:", raw.toString());
+      // Frames are client-controlled, so log a capped summary and never the frame.
+      const issues = result.error.issues;
+      console.log("WS frame rejected:", {
+        bytes: raw.toString().length,
+        issueCount: issues.length,
+        issues: issues.slice(0, 3).map((issue) => ({ code: issue.code, path: issue.path.slice(0, 5).join('.').slice(0, 100) })),
+      });
       return;
     }
     const msg = result.data; 
