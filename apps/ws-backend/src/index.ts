@@ -31,8 +31,10 @@ const server = http.createServer((req, res) => {
 
 // Railway injects PORT; fall back to 8080 for local dev.
 const PORT = Number(process.env.PORT) || 8080;
+const MAX_FRAME_BYTES = 1024 * 1024;
 const wss = new WebSocketServer({
   server,
+  maxPayload: MAX_FRAME_BYTES,
   verifyClient: (info: { origin: string }) => isOriginAllowed(info.origin),
 });
 

@@ -5,7 +5,9 @@ import { uid } from './helpers.ts';
 const MIB = 2 ** 20;
 
 const cases = [
-  { name: '1MiB valid op', bytes: MIB, valid: true, mustReject: false },
+  // Just under the 1 MiB limit once the JSON envelope is counted.
+  { name: '1MiB valid op', bytes: MIB - 1024, valid: true, mustReject: false },
+  { name: '2MiB valid op', bytes: 2 * MIB, valid: true, mustReject: true },
   { name: '8MiB valid op', bytes: 8 * MIB, valid: true, mustReject: true },
   { name: '64MiB valid op', bytes: 64 * MIB, valid: true, mustReject: true },
   { name: '64MiB schema-invalid frame', bytes: 64 * MIB, valid: false, mustReject: true },
