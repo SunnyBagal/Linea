@@ -35,6 +35,14 @@ const outDir = resultsDir(label);
 fs.mkdirSync(outDir, { recursive: true });
 const outFile = path.join(outDir, 'throughput.jsonl');
 
+async function committedTransactions(pool: ReturnType<typeof db>): Promise<number> {
+  await pool.query('SELECT pg_stat_force_next_flush()');
+  const { rows } = await pool.query(
+    `SELECT xact_commit FROM pg_stat_database WHERE datname = current_database()`,
+  );
+  return Number(rows[0].xact_commit);
+}
+
 interface WorkerResult {
   latencies: number[];
   ackBuckets: Array<[number, number]>;
@@ -51,6 +59,8 @@ async function runCell(mode: string, clients: number, rep: number) {
   const roomId = await seedRoom(pool, userId);
   const tokens = Array.from({ length: clients }, () => tokenFor(userId));
   const proxy = dbDelayMs > 0 ? await startDbProxy(() => dbDelayMs) : null;
+  await sleep(1200);
+  const commitsBefore = await committedTransactions(pool);
   const backend = await startBackend('ws', WS_PORT, `throughput-${mode.replace(':', '')}-c${clients}-r${rep}`,
     proxy ? { databaseUrl: proxy.url } : {});
 
@@ -121,6 +131,9 @@ async function runCell(mode: string, clients: number, rep: number) {
   const exitBeforeStop = backend.exitInfo();
   await backend.stop();
   proxy?.close();
+  // Backends report their counters as they exit, so read commits after the stop.
+  await sleep(1200);
+  const commitsAfter = await committedTransactions(pool);
 
   const totals = perClient.reduce((sum, c) => ({
     sent: sum.sent + c.sent,
@@ -179,6 +192,8 @@ async function runCell(mode: string, clients: number, rep: number) {
       rssMaxMb: samples.length ? Math.max(...samples.map((s) => s.rss)) / 2 ** 20 : null,
       sumBufferedMaxMb: samples.length ? Math.max(...samples.map((s) => s.sumBuffered)) / 2 ** 20 : null,
     },
+    // Includes a few harness and catalog transactions, so it slightly understates batching.
+    opsPerCommit: commitsAfter > commitsBefore ? audit.rows / (commitsAfter - commitsBefore) : null,
     postgresCpuCores: cpuPgStart.value !== null && cpuPgEnd !== null
       ? (cpuPgEnd - cpuPgStart.value) / pgWallSeconds : null,
     harness: {
@@ -198,7 +213,7 @@ async function runCell(mode: string, clients: number, rep: number) {
     `errors=${totals.errors} unacked=${totals.unacked} inv=${c.inversionsMaxPerClient} gaps=${c.gapsTotal} dups=${c.duplicatesTotal} ` +
     `orderSame=${c.allArrivalOrdersIdentical} contentDb=${c.contentMatchesDb} dbOk=${record.db.contiguousFromOne} ` +
     `srvCpu=${record.server.cpuCores?.toFixed(2)} pgCpu=${record.postgresCpuCores?.toFixed(2)} ` +
-    `harnessElu=${Math.max(...record.harness.eluByWorker)} crashed=${record.server.crashed}`,
+    `harnessElu=${Math.max(...record.harness.eluByWorker)} opsPerCommit=${record.opsPerCommit?.toFixed(2)} crashed=${record.server.crashed}`,
   );
 }
 
