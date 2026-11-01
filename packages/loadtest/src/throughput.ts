@@ -22,6 +22,7 @@ const label = arg('label', 'adhoc');
 const clientCounts = arg('clients', '5,20,50').split(',').map(Number);
 const modes = arg('modes', 'closed,open:800').split(',');
 const reps = Number(arg('reps', '3'));
+const repOffset = Number(arg('rep-offset', '0'));
 const durationMs = Number(arg('duration', '60')) * 1000;
 const warmupMs = Number(arg('warmup', '5')) * 1000;
 const settleMs = Number(arg('settle', '20')) * 1000;
@@ -204,7 +205,7 @@ async function runCell(mode: string, clients: number, rep: number) {
 for (let rep = 1; rep <= reps; rep += 1) {
   for (const mode of modes) {
     for (const clients of clientCounts) {
-      await runCell(mode, clients, rep);
+      await runCell(mode, clients, rep + repOffset);
     }
   }
 }
