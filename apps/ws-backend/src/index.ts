@@ -32,6 +32,7 @@ const server = http.createServer((req, res) => {
 // Railway injects PORT; fall back to 8080 for local dev.
 const PORT = Number(process.env.PORT) || 8080;
 const MAX_FRAME_BYTES = 1024 * 1024;
+const MAX_BUFFERED_BYTES = 8 * 1024 * 1024;
 const wss = new WebSocketServer({
   server,
   maxPayload: MAX_FRAME_BYTES,
@@ -61,13 +62,26 @@ function checkUser(token: string): string | null {
   }
 }
 
+// A client that stops reading is disconnected rather than buffered without limit.
+// It catches up over HTTP when it reconnects, like after any other disconnect.
+function send(ws: WebSocket, data: string) {
+  if (ws.readyState !== WebSocket.OPEN) return;
+
+  if (ws.bufferedAmount + data.length > MAX_BUFFERED_BYTES) {
+    ws.terminate();
+    connections.delete(ws);
+    return;
+  }
+  ws.send(data);
+}
+
 function broadcast(roomId: number, payload: unknown, exclude?: WebSocket) {
   const data = JSON.stringify(payload);
   for (const conn of connections.values()) {
     if (conn.ws === exclude) continue;
-    
-    if (conn.rooms.has(roomId) && conn.ws.readyState === WebSocket.OPEN) {
-      conn.ws.send(data);
+
+    if (conn.rooms.has(roomId)) {
+      send(conn.ws, data);
     }
   }
 }
@@ -140,7 +154,7 @@ wss.on('connection', (ws, request) => {
         console.error('join_room failed', err);
       }
 
-      ws.send(JSON.stringify({
+      send(ws, JSON.stringify({
         type: 'error',
         message: 'Failed to join room.'
       }));
@@ -208,7 +222,7 @@ wss.on('connection', (ws, request) => {
           userId: conn.userId,
         }, ws);
 
-        ws.send(JSON.stringify({
+        send(ws, JSON.stringify({
           type: 'op_ack',
           roomId: msg.roomId,
           shapeId: msg.shapeId,
@@ -217,9 +231,9 @@ wss.on('connection', (ws, request) => {
 
       } catch (err) {
         console.error('op persist failed', err);
-        ws.send(JSON.stringify({ 
-          type: 'error', 
-          message: 'Failed to apply operation.' 
+        send(ws, JSON.stringify({
+          type: 'error',
+          message: 'Failed to apply operation.'
         }));
       }
       return;

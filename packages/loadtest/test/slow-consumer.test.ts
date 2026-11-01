@@ -10,7 +10,9 @@ const OPS_PER_SECOND = 100;
 // Long enough to span two 30s heartbeat ticks, the only existing eviction path.
 const RUN_MS = 75_000;
 /** The most a single stalled socket may hold in server memory. */
-const BUFFER_LIMIT_BYTES = 32 * MIB;
+const BUFFER_LIMIT_BYTES = 8 * MIB;
+/** Well before the first possible heartbeat eviction at 60s. */
+const EVICTION_DEADLINE_SEC = 20;
 
 async function runLoad(name: string, slowConsumer: boolean) {
   const stack = await startStack(name);
@@ -68,6 +70,8 @@ async function runLoad(name: string, slowConsumer: boolean) {
       rssStartMb: (samples[0]?.rss ?? 0) / MIB,
       rssPeakMb: Math.max(...samples.map((s) => s.rss)) / MIB,
       slowCloseCode: slow?.closeCode ?? null,
+      healthyCloseCode: healthy.closeCode,
+      writerCloseCode: writer.closeCode,
       bufferedSeries: samples.filter((_, i) => i % 5 === 0).map((s) => Math.round(s.maxBuffered / MIB)),
       rssSeries: samples.filter((_, i) => i % 5 === 0).map((s) => Math.round(s.rss / MIB)),
       peakBuffered,
@@ -88,6 +92,11 @@ test('slow consumer does not grow server memory without bound', { timeout: 300_0
   record.check('server stays up', slow.alive, slow.exit);
   record.check('buffer for one stalled socket stays under the limit', slow.peakBuffered <= BUFFER_LIMIT_BYTES,
     { peakBufferedMb: slow.peakBufferedMb, limitMb: BUFFER_LIMIT_BYTES / MIB });
+  record.check('stalled socket is evicted before the heartbeat would do it',
+    slow.bufferDroppedAtSec !== null && slow.bufferDroppedAtSec <= EVICTION_DEADLINE_SEC,
+    { bufferDroppedAtSec: slow.bufferDroppedAtSec });
+  record.check('healthy clients stay connected', slow.healthyCloseCode === null && slow.writerCloseCode === null,
+    { healthy: slow.healthyCloseCode, writer: slow.writerCloseCode });
   record.check('healthy clients are not slowed by the stalled socket',
     (slow.writerAckP99Ms ?? 0) <= Math.max(2 * (control.writerAckP99Ms ?? 0), 50),
     { control: control.writerAckP99Ms, slow: slow.writerAckP99Ms });
