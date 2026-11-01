@@ -76,6 +76,7 @@ export interface Backend {
   url: string;
   alive(): Promise<boolean>;
   stop(signal?: NodeJS.Signals): Promise<void>;
+  waitForExit(timeoutMs: number): Promise<boolean>;
   exitInfo(): { code: number | null; signal: string | null } | null;
   logBytes(): number;
   logTail(lines?: number): string;
@@ -206,6 +207,10 @@ export async function startBackend(
     async stop(signal = 'SIGKILL') {
       if (!exit) proc.kill(signal);
       await exited;
+    },
+    async waitForExit(timeoutMs) {
+      await Promise.race([exited, sleep(timeoutMs)]);
+      return exit !== null;
     },
     exitInfo: () => exit,
     logBytes: () => fs.statSync(logPath).size,

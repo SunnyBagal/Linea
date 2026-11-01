@@ -34,6 +34,7 @@ const PORT = Number(process.env.PORT) || 8080;
 const MAX_FRAME_BYTES = 1024 * 1024;
 const MAX_BUFFERED_BYTES = 8 * 1024 * 1024;
 const OP_QUEUE_TIMEOUT_MS = 2000;
+const SHUTDOWN_STEP_TIMEOUT_MS = 3000;
 const wss = new WebSocketServer({
   server,
   maxPayload: MAX_FRAME_BYTES,
@@ -52,6 +53,7 @@ interface Connection {
 
 const connections = new Map<WebSocket, Connection>();
 const roomQueues = new Map<number, Promise<void>>();
+let shuttingDown = false;
 
 function checkUser(token: string): string | null {
   try {
@@ -224,6 +226,14 @@ wss.on('connection', (ws, request) => {
     }
 
     if (msg.type === 'op') {
+      if (shuttingDown) {
+        send(ws, JSON.stringify({
+          type: 'error',
+          message: 'Failed to apply operation.'
+        }));
+        return;
+      }
+
       const receivedAt = Date.now();
       enqueueRoomTask(msg.roomId, async () => {
         try {
@@ -312,3 +322,31 @@ const heartbeat = setInterval(() => {
 }, HEARTBEAT_MS);
 
 wss.on('close', () => clearInterval(heartbeat));
+
+function shutdownStep(step: Promise<unknown>) {
+  return Promise.race([
+    step,
+    new Promise((resolve) => setTimeout(resolve, SHUTDOWN_STEP_TIMEOUT_MS)),
+  ]);
+}
+
+// Deploys send SIGTERM. Finish queued ops so their acks go out, then close clients
+// with 1001 so they know to reconnect.
+async function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  clearInterval(heartbeat);
+
+  await shutdownStep(Promise.allSettled(roomQueues.values()));
+
+  for (const conn of connections.values()) {
+    conn.ws.close(1001, 'Server restarting');
+  }
+  await shutdownStep(new Promise((resolve) => wss.close(resolve)));
+  server.close();
+  await shutdownStep(prismaClient.$disconnect());
+  process.exit(0);
+}
+
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);

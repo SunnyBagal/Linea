@@ -35,6 +35,10 @@ async function restartCase(signal: 'SIGKILL' | 'SIGTERM') {
     const closeCodes = [...writers, observer].map((c) => c.closeCode);
     const allClosedMs = performance.now() - killedAt;
     clearInterval(timer);
+    // SIGTERM gets time to exit by itself, up to the server's shutdown timeouts.
+    await stack.ws.waitForExit(10_000);
+    const exitMs = performance.now() - killedAt;
+    const exitBeforeRestart = stack.ws.exitInfo();
     await stack.ws.stop();
 
     const ackedBefore = writers.flatMap((c) => c.ofType('op_ack'));
@@ -62,7 +66,8 @@ async function restartCase(signal: 'SIGKILL' | 'SIGTERM') {
 
     record.fact('closeCodes', closeCodes);
     record.fact('allClosedMs', allClosedMs);
-    record.fact('exitBeforeRestart', stack.ws.exitInfo());
+    record.fact('exitBeforeRestart', exitBeforeRestart);
+    record.fact('exitMs', exitMs);
     record.fact('ackedBeforeKill', ackedBefore.length);
     record.fact('rowsWhenDown', auditDown.rows);
     record.fact('persistedButNeverAcked', persistedUnacked);
@@ -81,6 +86,7 @@ async function restartCase(signal: 'SIGKILL' | 'SIGTERM') {
       record.check('SIGTERM closes sockets with 1001 or 1012',
         closeCodes.every((code) => code === 1001 || code === 1012), { closeCodes });
       record.check('SIGTERM acks or fails in-flight ops before exit', persistedUnacked === 0, { persistedUnacked });
+      record.check('SIGTERM exits cleanly', exitBeforeRestart?.code === 0, exitBeforeRestart);
     }
     [...reconnected, observerAfter].forEach((c) => c.close());
   } finally {
