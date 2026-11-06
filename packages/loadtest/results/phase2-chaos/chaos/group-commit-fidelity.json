@@ -1,0 +1,36 @@
+{
+  "case": "group-commit-fidelity",
+  "pass": true,
+  "env": {
+    "gitSha": "edd57411bf10e69cbe8064fd0ad67670c54bee3c",
+    "serverSourceDirty": false,
+    "cpu": "Apple M1 Pro",
+    "cores": 10,
+    "memGb": 16,
+    "platform": "darwin 27.0.0",
+    "node": "v24.14.1"
+  },
+  "checks": [
+    {
+      "name": "all rows persisted",
+      "pass": true,
+      "detail": {
+        "rows": 60
+      }
+    },
+    {
+      "name": "rows match what was sent",
+      "pass": true,
+      "detail": {
+        "mismatches": 0
+      }
+    },
+    {
+      "name": "broadcasts match what was sent",
+      "pass": true
+    }
+  ],
+  "facts": {
+    "rows": 60
+  }
+}

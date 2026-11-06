@@ -1,0 +1,54 @@
+{
+  "case": "unknown-room-join-over-int4",
+  "pass": true,
+  "env": {
+    "gitSha": "edd57411bf10e69cbe8064fd0ad67670c54bee3c",
+    "serverSourceDirty": false,
+    "cpu": "Apple M1 Pro",
+    "cores": 10,
+    "memGb": 16,
+    "platform": "darwin 27.0.0",
+    "node": "v24.14.1"
+  },
+  "checks": [
+    {
+      "name": "server stays up",
+      "pass": true,
+      "detail": {
+        "exit": null,
+        "log": "        at PrismaPgAdapter.performIO (/Users/sunny/Projects/graphite-ws-hardening/apps/ws-backend/dist/index.js:15371:12)\n        at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n        at async PrismaPgAdapter.queryRaw (/Users/sunny/Projects/graphite-ws-hardening/apps/ws-backend/dist/index.js:15302:30)\n        at async e.interpretNode (/Users/sunny/Projects/graphite-ws-hardening/apps/ws-backend/dist/index.js:6129:50)\n        at async e.interpretNode (/Users/sunny/Projects/graphite-ws-hardening/apps/ws-backend/dist/index.js:6139:49)\n        at async e.interpretNode (/Users/sunny/Projects/graphite-ws-hardening/apps/ws-backend/dist/index.js:6170:49)\n        at async e.run (/Users/sunny/Projects/graphite-ws-hardening/apps/ws-backend/dist/index.js:6081:28)\n        at async e.execute (/Users/sunny/Projects/graphite-ws-hardening/apps/ws-backend/dist/index.js:7124:16)\n        at async jt.request (/Users/sunny/Projects/graphite-ws-hardening/apps/ws-backend/dist/index.js:7667:19) {\n      cause: [Object]\n    }\n  },\n  clientVersion: '7.8.0'\n}\n"
+      }
+    },
+    {
+      "name": "other clients are unaffected",
+      "pass": true
+    },
+    {
+      "name": "real room seq is unaffected",
+      "pass": true,
+      "detail": {
+        "rows": 1
+      }
+    },
+    {
+      "name": "sender is told about the failure",
+      "pass": true,
+      "detail": {
+        "replies": [
+          "room_joined",
+          "error",
+          "op"
+        ]
+      }
+    }
+  ],
+  "facts": {
+    "replies": [
+      "room_joined",
+      "error"
+    ],
+    "exit": null,
+    "clientCloseCode": null,
+    "bystanderCloseCode": null
+  }
+}

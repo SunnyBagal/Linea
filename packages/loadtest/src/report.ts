@@ -26,13 +26,13 @@ function throughputSection(label: string): string {
       `wal_sync_method=${first.postgres.wal_sync_method}. ` +
       `${first.window.durationMs / 1000}s measured after ${first.window.warmupMs / 1000}s warm-up, fresh server and room per run.`,
     '',
-    '| mode | clients | rep | acked/s | worst 1s | p50 ms | p95 ms | p99 ms | max ms | errors | unacked | server CPU | PG CPU | harness ELU |',
-    '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
+    '| mode | clients | rep | acked/s | worst 1s | p50 ms | p95 ms | p99 ms | max ms | errors | unacked | ops per commit | server CPU | PG CPU | harness ELU |',
+    '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
   ];
   for (const r of records) {
     out.push(`| ${r.mode} | ${r.clients} | ${r.rep} | ${fmt(r.ackedOpsPerSec)} | ${r.ackedPerSecondMin} | ` +
       `${fmt(r.latencyMs.p50)} | ${fmt(r.latencyMs.p95)} | ${fmt(r.latencyMs.p99)} | ${fmt(r.latencyMs.max)} | ` +
-      `${r.totals.errors} | ${r.totals.unacked} | ${fmt(r.server.cpuCores, 2)} | ${fmt(r.postgresCpuCores, 2)} | ` +
+      `${r.totals.errors} | ${r.totals.unacked} | ${fmt(r.opsPerCommit, 2)} | ${fmt(r.server.cpuCores, 2)} | ${fmt(r.postgresCpuCores, 2)} | ` +
       `${Math.max(...r.harness.eluByWorker).toFixed(2)} |`);
   }
 

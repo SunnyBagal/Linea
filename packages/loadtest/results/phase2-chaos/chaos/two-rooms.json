@@ -1,0 +1,53 @@
+{
+  "case": "two-rooms",
+  "pass": true,
+  "env": {
+    "gitSha": "edd57411bf10e69cbe8064fd0ad67670c54bee3c",
+    "serverSourceDirty": false,
+    "cpu": "Apple M1 Pro",
+    "cores": 10,
+    "memGb": 16,
+    "platform": "darwin 27.0.0",
+    "node": "v24.14.1"
+  },
+  "checks": [
+    {
+      "name": "room A clients see no room B frames",
+      "pass": true
+    },
+    {
+      "name": "room B clients see no room A frames",
+      "pass": true
+    },
+    {
+      "name": "database rows stay in their own room",
+      "pass": true
+    },
+    {
+      "name": "seq contiguous in both rooms",
+      "pass": true
+    },
+    {
+      "name": "observer A saw every room A op",
+      "pass": true
+    },
+    {
+      "name": "observer B saw every room B op",
+      "pass": true
+    },
+    {
+      "name": "a client in both rooms saw both streams",
+      "pass": true
+    },
+    {
+      "name": "observers saw ops in seq order",
+      "pass": true
+    }
+  ],
+  "facts": {
+    "rowsA": 6770,
+    "rowsB": 6769,
+    "inversionsA": 0,
+    "inversionsB": 0
+  }
+}

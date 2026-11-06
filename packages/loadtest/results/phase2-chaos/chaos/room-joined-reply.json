@@ -1,0 +1,123 @@
+{
+  "case": "room-joined-reply",
+  "pass": true,
+  "env": {
+    "gitSha": "edd57411bf10e69cbe8064fd0ad67670c54bee3c",
+    "serverSourceDirty": false,
+    "cpu": "Apple M1 Pro",
+    "cores": 10,
+    "memGb": 16,
+    "platform": "darwin 27.0.0",
+    "node": "v24.14.1"
+  },
+  "checks": [
+    {
+      "name": "empty room replies with seq 0",
+      "pass": true,
+      "detail": [
+        {
+          "type": "room_joined",
+          "roomId": 18,
+          "seq": 0
+        },
+        {
+          "type": "op_ack",
+          "roomId": 18,
+          "shapeId": "seed-b00074d834",
+          "seq": 1
+        },
+        {
+          "type": "op_ack",
+          "roomId": 18,
+          "shapeId": "seed-6372d23f08",
+          "seq": 2
+        },
+        {
+          "type": "op_ack",
+          "roomId": 18,
+          "shapeId": "seed-284f6247b1",
+          "seq": 3
+        },
+        {
+          "type": "op_ack",
+          "roomId": 18,
+          "shapeId": "seed-65b29f24fe",
+          "seq": 4
+        },
+        {
+          "type": "op_ack",
+          "roomId": 18,
+          "shapeId": "seed-4d5443f0b7",
+          "seq": 5
+        },
+        {
+          "type": "op_ack",
+          "roomId": 18,
+          "shapeId": "after-join-74df6315e5",
+          "seq": 6
+        }
+      ]
+    },
+    {
+      "name": "reply names the room",
+      "pass": true
+    },
+    {
+      "name": "later join replies with the current seq",
+      "pass": true,
+      "detail": [
+        {
+          "type": "room_joined",
+          "roomId": 18,
+          "seq": 5
+        },
+        {
+          "type": "op",
+          "roomId": 18,
+          "seq": 6,
+          "opType": "CREATE",
+          "shapeId": "after-join-74df6315e5",
+          "payload": {
+            "id": "after-join-74df6315e5",
+            "type": "rect",
+            "x": 10,
+            "y": 20,
+            "width": 100,
+            "height": 50
+          },
+          "userId": "lt-user-f1ec08da4acf"
+        }
+      ]
+    },
+    {
+      "name": "unknown room gets an error and no reply",
+      "pass": true,
+      "detail": [
+        {
+          "type": "error",
+          "roomId": 19,
+          "message": "Failed to join room."
+        }
+      ]
+    },
+    {
+      "name": "a leave during the join gets no reply",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "every op above the reply seq is broadcast to the joiner",
+      "pass": true,
+      "detail": {
+        "reply": 5,
+        "broadcast": [
+          6
+        ],
+        "above": [
+          6
+        ]
+      }
+    }
+  ],
+  "facts": {}
+}

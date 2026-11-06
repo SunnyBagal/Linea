@@ -1,0 +1,49 @@
+{
+  "case": "group-commit-round-trips",
+  "pass": true,
+  "env": {
+    "gitSha": "edd57411bf10e69cbe8064fd0ad67670c54bee3c",
+    "serverSourceDirty": false,
+    "cpu": "Apple M1 Pro",
+    "cores": 10,
+    "memGb": 16,
+    "platform": "darwin 27.0.0",
+    "node": "v24.14.1"
+  },
+  "checks": [
+    {
+      "name": "each lone op takes one database reply",
+      "pass": true,
+      "detail": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ]
+    }
+  ],
+  "facts": {
+    "repliesPerOp": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ]
+  }
+}

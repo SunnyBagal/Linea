@@ -1,7 +1,7 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import jwt from 'jsonwebtoken';
 import { JWT_SECRET } from '@repo/backend-common/config';
-import { prisma as prismaClient, Prisma } from '@repo/db/client';
+import { prisma as prismaClient } from '@repo/db/client';
 import { WsMessageSchema } from '@repo/common/types';
 import http from 'http';
 
@@ -34,6 +34,8 @@ const PORT = Number(process.env.PORT) || 8080;
 const MAX_FRAME_BYTES = 1024 * 1024;
 const MAX_BUFFERED_BYTES = 8 * 1024 * 1024;
 const OP_QUEUE_TIMEOUT_MS = 2000;
+const MAX_BATCH_OPS = 100;
+const MAX_BATCH_PAYLOAD_BYTES = 4 * 1024 * 1024;
 const SHUTDOWN_STEP_TIMEOUT_MS = 3000;
 const wss = new WebSocketServer({
   server,
@@ -52,7 +54,24 @@ interface Connection {
 }
 
 const connections = new Map<WebSocket, Connection>();
-const roomQueues = new Map<number, Promise<void>>();
+
+interface PendingOp {
+  ws: WebSocket;
+  userId: string;
+  roomId: number;
+  opType: 'CREATE' | 'UPDATE' | 'DELETE';
+  shapeId: string;
+  payload: unknown;
+  payloadJson: string;
+  receivedAt: number;
+}
+
+interface RoomQueue {
+  pending: PendingOp[];
+  drain: Promise<void>;
+}
+
+const roomQueues = new Map<number, RoomQueue>();
 let shuttingDown = false;
 
 function checkUser(token: string): string | null {
@@ -91,16 +110,155 @@ function broadcast(roomId: number, payload: unknown, exclude?: WebSocket) {
   }
 }
 
-// Commit, broadcast and ack run one op at a time per room. Concurrent transactions
-// could finish out of order, sending clients seq 6 before seq 5.
-function enqueueRoomTask(roomId: number, task: () => Promise<void>) {
-  const tail = (roomQueues.get(roomId) ?? Promise.resolve())
-    .then(task)
-    .catch((err) => console.error('room task failed', err))
-    .finally(() => {
-      if (roomQueues.get(roomId) === tail) roomQueues.delete(roomId);
-    });
-  roomQueues.set(roomId, tail);
+function rejectJoin(ws: WebSocket, roomId: number) {
+  send(ws, JSON.stringify({
+    type: 'error',
+    roomId,
+    message: 'Failed to join room.'
+  }));
+}
+
+// Names the op, so the client can roll back the optimistic change it made for it.
+function rejectOp(ws: WebSocket, op: Pick<PendingOp, 'roomId' | 'shapeId' | 'opType'>) {
+  send(ws, JSON.stringify({
+    type: 'error',
+    roomId: op.roomId,
+    shapeId: op.shapeId,
+    opType: op.opType,
+    message: 'Failed to apply operation.'
+  }));
+}
+
+// One statement, so one database round trip and one commit however many ops it holds.
+// The seq bump and the inserts are atomic and the seqs are contiguous, in batch order.
+async function commitBatch(roomId: number, batch: PendingOp[]): Promise<number> {
+  const count = batch.length;
+  const rows = await prismaClient.$queryRaw<{ firstSeq: number | null; inserted: number }[]>`
+    WITH bumped AS (
+      UPDATE "Room"
+      SET "currentSeq" = "currentSeq" + ${count}::int
+      WHERE "id" = ${roomId}::int
+      RETURNING "currentSeq"
+    ), inserted AS (
+      INSERT INTO "Operation" ("roomId", "seq", "type", "shapeId", "payload", "userId")
+      SELECT
+        ${roomId}::int,
+        bumped."currentSeq" - ${count}::int + input.position::int,
+        input.op_type::"OpType",
+        input.shape_id,
+        input.payload::jsonb,
+        input.user_id
+      FROM bumped, unnest(
+        ${batch.map((op) => op.opType)}::text[],
+        ${batch.map((op) => op.shapeId)}::text[],
+        ${batch.map((op) => op.payloadJson)}::text[],
+        ${batch.map((op) => op.userId)}::text[]
+      ) WITH ORDINALITY AS input(op_type, shape_id, payload, user_id, position)
+      RETURNING "seq"
+    )
+    SELECT min("seq")::int AS "firstSeq", count(*)::int AS "inserted" FROM inserted
+  `;
+
+  const firstSeq = rows[0]?.firstSeq;
+  if (firstSeq == null || rows[0]?.inserted !== count) {
+    throw new Error(`room ${roomId} is gone`);
+  }
+  return firstSeq;
+}
+
+function publishCommitted(batch: PendingOp[], firstSeq: number) {
+  batch.forEach((op, index) => {
+    const seq = firstSeq + index;
+
+    broadcast(op.roomId, {
+      type: 'op',
+      roomId: op.roomId,
+      seq,
+      opType: op.opType,
+      shapeId: op.shapeId,
+      payload: op.payload,
+      userId: op.userId,
+    }, op.ws);
+
+    send(op.ws, JSON.stringify({
+      type: 'op_ack',
+      roomId: op.roomId,
+      shapeId: op.shapeId,
+      seq,
+    }));
+  });
+}
+
+async function commitAndPublish(roomId: number, batch: PendingOp[]) {
+  try {
+    publishCommitted(batch, await commitBatch(roomId, batch));
+    return;
+  } catch (err) {
+    if (batch.length === 1) {
+      console.error('op persist failed', err);
+      rejectOp(batch[0]!.ws, batch[0]!);
+      return;
+    }
+  }
+
+  // The whole statement rolled back. Retry one at a time so one bad op
+  // (a NUL byte, an oversized shapeId) can't fail the ops batched with it.
+  for (const op of batch) {
+    await commitAndPublish(roomId, [op]);
+  }
+}
+
+function takeBatch(queue: RoomQueue): PendingOp[] {
+  const batch: PendingOp[] = [];
+  let payloadBytes = 0;
+
+  while (batch.length < MAX_BATCH_OPS) {
+    const op = queue.pending[0];
+    if (!op) break;
+
+    // Past the wait limit the client gets an error, not an unbounded queue.
+    if (Date.now() - op.receivedAt > OP_QUEUE_TIMEOUT_MS) {
+      queue.pending.shift();
+      console.error('op persist failed: expired in room queue');
+      rejectOp(op.ws, op);
+      continue;
+    }
+
+    payloadBytes += op.payloadJson.length;
+    if (batch.length > 0 && payloadBytes > MAX_BATCH_PAYLOAD_BYTES) break;
+
+    queue.pending.shift();
+    batch.push(op);
+  }
+  return batch;
+}
+
+// Ops that arrive during a commit wait here and go into the next batch together,
+// so slower commits automatically carry more ops, with no added delay when idle.
+// Commit, broadcast and ack stay strictly in order per room.
+async function drainRoom(roomId: number, queue: RoomQueue) {
+  while (queue.pending.length > 0) {
+    try {
+      const batch = takeBatch(queue);
+      if (batch.length > 0) await commitAndPublish(roomId, batch);
+    } catch (err) {
+      console.error('room batch failed', err);
+    }
+  }
+  // No await between the empty check and this delete, so no op can be stranded.
+  roomQueues.delete(roomId);
+}
+
+function enqueueOp(op: PendingOp) {
+  const queue = roomQueues.get(op.roomId);
+  if (queue) {
+    queue.pending.push(op);
+    return;
+  }
+
+  const created: RoomQueue = { pending: [op], drain: Promise.resolve() };
+  roomQueues.set(op.roomId, created);
+  created.drain = drainRoom(op.roomId, created);
 }
 
 wss.on('connection', (ws, request) => {
@@ -175,14 +333,43 @@ wss.on('connection', (ws, request) => {
       if (conn.joining.get(msg.roomId) !== lookup) return;
       conn.joining.delete(msg.roomId);
 
-      if (found) {
-        conn.rooms.add(msg.roomId);
+      if (!found) {
+        rejectJoin(ws, msg.roomId);
+        return;
+      }
+
+      // Join first, then read the seq. Any op above that seq commits after this
+      // client is a member, so it gets broadcast here. Everything up to it is
+      // already in the database. Together they let the client catch up exactly.
+      conn.rooms.add(msg.roomId);
+      const seq = await prismaClient.room
+        .findUnique({
+          where: {
+            id: msg.roomId
+          },
+          select: {
+            currentSeq: true
+          },
+        })
+        .then((room) => room?.currentSeq ?? null)
+        .catch((err) => {
+          console.error('join_room failed', err);
+          return null;
+        });
+
+      // A leave_room during the read wins, and a newer join_room sends its own reply.
+      if (!conn.rooms.has(msg.roomId) || conn.joining.has(msg.roomId)) return;
+
+      if (seq === null) {
+        conn.rooms.delete(msg.roomId);
+        rejectJoin(ws, msg.roomId);
         return;
       }
 
       send(ws, JSON.stringify({
-        type: 'error',
-        message: 'Failed to join room.'
+        type: 'room_joined',
+        roomId: msg.roomId,
+        seq,
       }));
       return;
     }
@@ -199,12 +386,7 @@ wss.on('connection', (ws, request) => {
     }
 
     if (!conn.rooms.has(msg.roomId)) {
-      if (msg.type === 'op') {
-        send(ws, JSON.stringify({
-          type: 'error',
-          message: 'Failed to apply operation.'
-        }));
-      }
+      if (msg.type === 'op') rejectOp(ws, msg);
       return;
     }
 
@@ -227,71 +409,19 @@ wss.on('connection', (ws, request) => {
 
     if (msg.type === 'op') {
       if (shuttingDown) {
-        send(ws, JSON.stringify({
-          type: 'error',
-          message: 'Failed to apply operation.'
-        }));
+        rejectOp(ws, msg);
         return;
       }
 
-      const receivedAt = Date.now();
-      enqueueRoomTask(msg.roomId, async () => {
-        try {
-          // Past the wait limit the client gets an error, not an unbounded queue.
-          if (Date.now() - receivedAt > OP_QUEUE_TIMEOUT_MS) {
-            throw new Error('op expired in room queue');
-          }
-
-          const op = await prismaClient.$transaction(async (tx) => {
-            const room = await tx.room.update({
-              where: { 
-                id: msg.roomId 
-              },
-              data: { 
-                currentSeq: { increment: 1 } 
-              },   
-              select: { 
-                currentSeq: true 
-              },
-            });
-
-            return tx.operation.create({
-              data: {
-                roomId: msg.roomId,
-                seq: room.currentSeq,
-                type: msg.opType,
-                shapeId: msg.shapeId,
-                payload: msg.payload ?? Prisma.JsonNull,
-                userId: conn.userId,
-              },
-              select: { seq: true },
-            });
-          });
-
-          broadcast(msg.roomId, {
-            type: 'op',
-            roomId: msg.roomId,
-            seq: op.seq,
-            opType: msg.opType,
-            shapeId: msg.shapeId,
-            payload: msg.payload,
-            userId: conn.userId,
-          }, ws);
-
-          send(ws, JSON.stringify({
-            type: 'op_ack',
-            roomId: msg.roomId,
-            shapeId: msg.shapeId,
-            seq: op.seq
-          }));
-
-        } catch (err) {
-          console.error('op persist failed', err);
-          send(ws, JSON.stringify({
-            type: 'error',
-            message: 'Failed to apply operation.'
-          }));
-        }
+      enqueueOp({
+        ws,
+        userId: conn.userId,
+        roomId: msg.roomId,
+        opType: msg.opType,
+        shapeId: msg.shapeId,
+        payload: msg.payload,
+        payloadJson: JSON.stringify(msg.payload ?? null),
+        receivedAt: Date.now(),
       });
       return;
     }
@@ -337,7 +467,7 @@ async function shutdown() {
   shuttingDown = true;
   clearInterval(heartbeat);
 
-  await shutdownStep(Promise.allSettled(roomQueues.values()));
+  await shutdownStep(Promise.allSettled([...roomQueues.values()].map((queue) => queue.drain)));
 
   for (const conn of connections.values()) {
     conn.ws.close(1001, 'Server restarting');

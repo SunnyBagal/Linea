@@ -1,0 +1,162 @@
+{
+  "case": "slow-consumer",
+  "pass": true,
+  "env": {
+    "gitSha": "edd57411bf10e69cbe8064fd0ad67670c54bee3c",
+    "serverSourceDirty": false,
+    "cpu": "Apple M1 Pro",
+    "cores": 10,
+    "memGb": 16,
+    "platform": "darwin 27.0.0",
+    "node": "v24.14.1"
+  },
+  "checks": [
+    {
+      "name": "server stays up",
+      "pass": true,
+      "detail": null
+    },
+    {
+      "name": "buffer for one stalled socket stays under the limit",
+      "pass": true,
+      "detail": {
+        "peakBufferedMb": 6.947487831115723,
+        "limitMb": 8
+      }
+    },
+    {
+      "name": "stalled socket is evicted before the heartbeat would do it",
+      "pass": true,
+      "detail": {
+        "bufferDroppedAtSec": 3
+      }
+    },
+    {
+      "name": "healthy clients stay connected",
+      "pass": true,
+      "detail": {
+        "healthy": null,
+        "writer": null
+      }
+    },
+    {
+      "name": "healthy clients are not slowed by the stalled socket",
+      "pass": true,
+      "detail": {
+        "control": 23.554000000003725,
+        "slow": 23.13704200000211
+      }
+    }
+  ],
+  "facts": {
+    "load": {
+      "opBytes": 32768,
+      "opsPerSecond": 100,
+      "runMs": 75000
+    },
+    "control": {
+      "alive": true,
+      "exit": null,
+      "opsPersisted": 6994,
+      "writerAckP50Ms": 11.089249999997264,
+      "writerAckP99Ms": 23.554000000003725,
+      "peakBufferedMb": 0,
+      "peakBufferedAtSec": 0,
+      "bufferDroppedAtSec": null,
+      "rssStartMb": 139.953125,
+      "rssPeakMb": 331.34375,
+      "slowCloseCode": null,
+      "healthyCloseCode": null,
+      "writerCloseCode": null,
+      "bufferedSeries": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "rssSeries": [
+        140,
+        192,
+        263,
+        302,
+        284,
+        285,
+        311,
+        323,
+        328,
+        328,
+        331,
+        319,
+        330,
+        290,
+        293,
+        164
+      ],
+      "peakBuffered": 0
+    },
+    "slowConsumer": {
+      "alive": true,
+      "exit": null,
+      "opsPersisted": 6979,
+      "writerAckP50Ms": 11.129165999998804,
+      "writerAckP99Ms": 23.13704200000211,
+      "peakBufferedMb": 6.947487831115723,
+      "peakBufferedAtSec": 2,
+      "bufferDroppedAtSec": 3,
+      "rssStartMb": 141.671875,
+      "rssPeakMb": 310.640625,
+      "slowCloseCode": null,
+      "healthyCloseCode": null,
+      "writerCloseCode": null,
+      "bufferedSeries": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "rssSeries": [
+        142,
+        235,
+        240,
+        248,
+        279,
+        281,
+        303,
+        280,
+        278,
+        284,
+        268,
+        262,
+        262,
+        170,
+        168,
+        175
+      ],
+      "peakBuffered": 7284969
+    }
+  }
+}

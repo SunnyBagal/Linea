@@ -1,0 +1,59 @@
+{
+  "case": "group-commit-burst",
+  "pass": true,
+  "env": {
+    "gitSha": "edd57411bf10e69cbe8064fd0ad67670c54bee3c",
+    "serverSourceDirty": false,
+    "cpu": "Apple M1 Pro",
+    "cores": 10,
+    "memGb": 16,
+    "platform": "darwin 27.0.0",
+    "node": "v24.14.1"
+  },
+  "checks": [
+    {
+      "name": "every op persisted",
+      "pass": true,
+      "detail": {
+        "rows": 1000,
+        "total": 1000
+      }
+    },
+    {
+      "name": "ops share commits",
+      "pass": true,
+      "detail": {
+        "commits": 11,
+        "total": 1000
+      }
+    },
+    {
+      "name": "no commit exceeds the op cap",
+      "pass": true
+    },
+    {
+      "name": "database seq contiguous",
+      "pass": true
+    },
+    {
+      "name": "observer gets seqs 1..N in order",
+      "pass": true,
+      "detail": {
+        "received": 1000
+      }
+    },
+    {
+      "name": "each writer gets acks in send order",
+      "pass": true
+    },
+    {
+      "name": "acks match database rows",
+      "pass": true
+    }
+  ],
+  "facts": {
+    "rows": 1000,
+    "commits": 11,
+    "largestCommitOps": 100
+  }
+}
